@@ -13,7 +13,6 @@ logging.basicConfig(level=logging.INFO,
 # --- 加载外部配置文件 ---
 try:
     with open('/app/src/config/config.json', 'r') as f:
-        # !!! 关键修复：将文件对象 f 传递给 json.load() !!!
         config = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError) as e:
     logging.warning(f"无法加载或解析 config.json 文件: {e}。将使用默认值。")
@@ -30,7 +29,6 @@ RENEW_DAYS = os.environ.get('RENEW_DAYS', '30')
 cert_config = config.get('certificate', {})
 CERT_OUTPUT_PATH = os.environ.get('CERT_OUTPUT_PATH') or cert_config.get('output_path') or '/output'
 KEY_FILENAME = os.environ.get('KEY_FILENAME') or cert_config.get('key_filename') or 'privkey.pem'
-FULLCHAIN_FILENAME = os.environ.get('FULLCHAIN_FILENAME') or cert_config.get('fullchain_filename') or 'fullchain.pem'
 CERT_FILENAME = os.environ.get('CERT_FILENAME') or cert_config.get('cert_filename') or 'cert.pem'
 CA_FILENAME = os.environ.get('CA_FILENAME') or cert_config.get('ca_filename') or 'ca.pem'
 
@@ -109,7 +107,6 @@ def issue_or_renew_cert():
 
 def install_cert():
     full_key_path = os.path.join(CERT_OUTPUT_PATH, KEY_FILENAME)
-    full_chain_path = os.path.join(CERT_OUTPUT_PATH, FULLCHAIN_FILENAME)
     full_cert_path = os.path.join(CERT_OUTPUT_PATH, CERT_FILENAME)
     full_ca_path = os.path.join(CERT_OUTPUT_PATH, CA_FILENAME)
     
@@ -127,7 +124,6 @@ def install_cert():
     install_command = [
         acme_sh_path, '--install-cert', '-d', DOMAIN, '--ecc',
         '--key-file', full_key_path,
-        '--fullchain-file', full_chain_path,
         '--cert-file', full_cert_path,
         '--ca-file', full_ca_path
     ]
