@@ -1,111 +1,104 @@
 # 群晖泛域名证书自动续签工具 (Syno Cert Renewer)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docker](https://img.shields.io/badge/Docker-ready-blue.svg)](https://www.docker.com/)
-[![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
-
-✨ 一个轻量、稳定、一劳永逸的群晖 NAS 泛域名 SSL 证书解决方案。
-
-本项目旨在通过 Docker，全自动地为你的群晖 NAS 申请并续签由 Let's Encrypt 颁发的**泛域名** SSL 证书，让你彻底告别手动续签的烦恼。
+✨ 一个采用现代化软件工程实践构建的，灵活、稳定、可扩展的群晖 NAS 泛域名 SSL 证书解决方案。
 
 ## 核心特性
 
--   **🚀 全自动**: 首次运行立即申请，之后通过定时任务每天检查，在证书过期前自动续签。
+-   **🚀 全自动**: 首次运行立即申请，之后通过定时任务自动检查并在证书过期前续签。
+-   **🔌 模块化通知**: 采用面向接口的可扩展架构，当前内置**企业微信群机器人**通知，可轻松扩展至钉钉、飞书、邮件等。
+-   **🔧 高度可配置**: 支持通过环境变量和配置文件进行双重配置，环境变量拥有更高优先级，便于在 Docker 环境中快速部署和覆盖。
 -   **🛡️ 泛域名支持**: 一次申请，`yourdomain.com` 和 `*.yourdomain.com` 全部搞定。
--   **📦 Docker化部署**: 将所有依赖和复杂性封装在 Docker 容器内，保持宿主机环境纯净。
--   **🔧 配置简单**: 所有配置均通过环境变量完成，无需修改任何代码。
+-   **📦 专业项目结构**: 所有 Python 源码统一归于 `src` 目录下，结构清晰，便于维护和二次开发。
 -   **☁️ 主流 DNS 支持**: 内置支持**阿里云**和**腾讯云(DNSPod)**的 DNS-API 验证方式。
--   **🔒 安全可靠**: 基于业界标准的 `acme.sh` 脚本，流程透明，安全可靠。
+-   **🔒 兼容与可靠**: 基于业界标准的 `acme.sh` 脚本，并特别优化了证书输出格式，完美兼容群晖 DSM 系统导入。
 
-## 工作原理
+## 项目结构
 
-本工具的核心是一个 Docker 容器，其内部包含：
 
-1.  **`acme.sh`**: 强大的 Let's Encrypt 客户端，负责证书的申请和续签。
-2.  **`Python 脚本`**: 作为主控逻辑，负责从环境变量读取配置，调用 `acme.sh`，并将生成的证书文件妥善放置到指定目录。
-3.  **`Cron`**: 一个轻量级的定时任务服务，负责每天定时触发 Python 脚本，检查并执行续签任务。
+syno-cert-renewer/
+├── src/
+│   ├── config/
+│   │   └── config.json              # 默认配置文件
+│   ├── notifiers/
+│   │   ├── init.py              # 将 notifiers 声明为 Python 包
+│   │   ├── base_notifier.py         # 通知服务的抽象基类 (接口)
+│   │   ├── notification_manager.py  # 通知管理器，负责分发消息
+│   │   └── wecom_notifier.py        # 企业微信通知的具体实现
+│   └── main.py                      # 主控逻辑脚本
+├── Dockerfile                       # 用于构建镜像的说明文件
+├── entrypoint.sh                    # Docker 容器的入口脚本
+└── README.md                        # 本说明文档
 
-容器启动后，会立即执行一次证书申请流程。同时，它会设定一个每天凌晨3点的定时任务，以确保证书在到期前被自动更新。
 
-## 前提条件
+## 如何使用
 
-在开始之前，请确保你已具备：
+### 环境变量详解
 
-1.  一台运行 DSM 7.x 或更高版本的群晖 NAS。
-2.  已在群晖套件中心安装并运行 **Container Manager** (旧版 DSM 中名为 Docker)。
-3.  一个属于你自己的域名，并且能够修改其 DNS 解析记录。
-4.  拥有该域名所使用的 **阿里云** 或 **腾讯云** 账号，并已获取 API 访问凭证 (AccessKey ID 和 Secret)。
+这是配置此项目最核心的方式。在启动 Docker 容器时，请设置以下环境变量。
 
-## 部署指南
+| 变量名 | 示例值 | **描述** |
+| :--- | :--- | :--- |
+| **--- 必填配置 ---** | |
+| `DOMAIN` | `yourdomain.com` | 你的主域名。 |
+| `DNS_API` | `dns_ali` | DNS 提供商。`dns_ali` (阿里云) 或 `dns_dp` (腾讯云 DNSPod)。 |
+| `API_KEY` | `LTxxxxxxxx` | 你的 DNS API Key。 |
+| `API_SECRET` | `GZyyyyyyyy` | 你的 DNS API Secret。 |
+| `ACME_EMAIL` | `user@example.com` | 用于 Let's Encrypt 账户注册和过期通知的邮箱。 |
+| | |
+| **--- 可选配置 (通知) ---** | |
+| `WECOM_WEBHOOK_URL`| `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...` | (可选) **企业微信群机器人 Webhook 地址**。配置后将启用企业微信通知。 |
+| | |
+| **--- 可选配置 (行为与路径) ---** | |
+| `CRON_SCHEDULE`| `"0 5 * * *"` | (可选) 自定义定时任务的 Cron 表达式。**默认值: `"0 3 * * *"` (每天凌晨3点)**。 |
+| `RENEW_DAYS` | `30` | (可选) 设置证书在到期前多少天进行续签。**默认值: 30**。 |
+| `CERT_OUTPUT_PATH`| `/output/live` | (可选) 证书输出路径。**默认值: `/output`**。 |
+| `KEY_FILENAME` | `private.key` | (可选) 私钥文件名。**默认值: `privkey.pem`**。 |
+| `FULLCHAIN_FILENAME`|`chain.pem`| (可选) 全链证书文件名。**默认值: `fullchain.pem`**。 |
+| `CERT_FILENAME` | `cert.pem` | (可选) 服务器证书文件名。**默认值: `cert.pem`**。 |
+| `CA_FILENAME` | `intermediate.pem`| (可选) 中间证书文件名。**默认值: `ca.pem`**。 |
 
-部署过程分为两步：构建 Docker 镜像，然后在群晖中运行容器。
+### `config.json` 配置文件
 
-### 步骤 1: 构建 Docker 镜像
+项目内置一个默认的配置文件。**注意：环境变量的优先级总是高于配置文件。** 这意味着如果一个配置项同时在环境变量和 `config.json` 中设置，程序将使用环境变量的值。
 
-> **你可以选择以下任一方式将镜像弄到你的群晖上。**
+### 如何配置企业微信通知
 
-#### 方式 A: 在本地电脑构建并推送到 Docker Hub (推荐)
+1.  在您的企业微信中，选择一个群聊。
+2.  点击右上角的群设置 (···) -> **群机器人** -> **添加机器人**。
+3.  给机器人起一个名字，例如“证书小助手”，然后点击**添加**。
+4.  在下一个页面，您会看到一个 `Webhook` 地址。**复制**这个完整的地址。
+5.  在启动 Docker 容器时，将这个地址作为 `WECOM_WEBHOOK_URL` 环境变量的值传入即可。
 
-这是最方便的方式，便于多设备部署和分享。
+### 如何在群晖中导入证书
 
-1.  在你的电脑上安装 Docker。
-2.  克隆或下载本项目所有文件。
-3.  在项目根目录下打开终端，运行构建命令：
+为了确保最佳兼容性，本项目现在会生成四个关键文件。在群晖 **控制面板 -> 安全性 -> 证书 -> 新增 -> 添加新证书 -> 导入证书** 时，请按以下方式对应：
+
+1.  **私钥**: 选择您生成的 `privkey.pem` 文件。
+2.  **证书**: 选择您生成的 `cert.pem` 文件。
+3.  **中间证书**: **选择您生成的 `ca.pem` 文件。**
+
+通过这种方式，可以确保群晖系统正确识别证书链，避免导入失败。
+
+## 部署步骤
+
+1.  **准备文件**: 确保您本地的项目文件结构与本文档描述的一致（`config` 和 `notifiers` 目录都在 `src` 内部）。
+2.  **清理旧环境 (推荐)**:
     ```bash
-    docker build -t your-dockerhub-username/syno-cert-renewer:latest .
+    docker rm -f syno-cert-renewer
+    docker rmi syno-cert-renewer:latest
     ```
-    *(请将 `your-dockerhub-username` 替换为你的 Docker Hub 用户名)*
-
-4.  登录并推送镜像到 Docker Hub：
-    ```bash
-    docker login
-    docker push your-dockerhub-username/syno-cert-renewer:latest
-    ```
-
-#### 方式 B: 在本地电脑构建并导出为文件
-
-如果你不想使用 Docker Hub，可以构建后导出，再上传到群晖。
-
-1.  同上，先在本地电脑构建镜像：
+3.  **重新构建镜像**: 在项目根目录下执行：
     ```bash
     docker build -t syno-cert-renewer:latest .
     ```
-2.  将镜像保存为 `.tar` 文件：
-    ```bash
-    docker save -o syno-cert-renewer.tar syno-cert-renewer:latest
-    ```
-    现在你得到了一个 `syno-cert-renewer.tar` 文件，可以上传到群晖了。
+4.  **运行容器**: 使用 `docker run` 命令或通过群晖 Container Manager 界面，配置好您需要的环境变量后，启动容器。
 
-### 步骤 2: 在群晖 Container Manager 中配置并运行容器
+## 如何扩展通知方式 (开发者)
 
-1.  **导入镜像**
-    -   **如果使用方式A**: 打开 **Container Manager** -> **注册表**，搜索你刚刚推送的镜像 (`your-dockerhub-username/syno-cert-renewer`)，选中后点击 **下载**。
-    -   **如果使用方式B**: 打开 **Container Manager** -> **映像** -> **新增** -> **从文件上传**，然后选择你导出的 `syno-cert-renewer.tar` 文件。
+得益于新的模块化设计，添加新的通知方式非常简单：
 
-2.  **创建容器**
-    -   转到 **映像** 菜单，找到 `syno-cert-renewer:latest` 镜像，选中它并点击 **运行**。
-
-3.  **常规设置**
-    -   给你的容器起个名字，例如 `syno-cert-renewer`。
-    -   点击 **高级设置**。
-
-4.  **配置卷 (重要！)**
-    -   切换到 **卷** 标签页。
-    -   点击 **添加文件夹**。
-    -   **文件/文件夹**: 在你的 `docker` 共享文件夹下创建一个用于存放证书的目录，例如 `certs`，然后在这里选择它。路径类似于 `/volume1/docker/certs`。
-    -   **装载路径**: **必须**填写 `/output`。这是容器内部的路径，程序会将证书文件写入这里。
-
-    ![Volume Mapping Example](https://i.imgur.com/uN8GflW.png) *(这是一个示例图，请根据你的实际路径选择)*
-
-5.  **配置环境变量 (核心！)**
-    -   切换到 **环境** 标签页。
-    -   参考下表，点击 **新增**，逐一添加所有必要的环境变量。
-
-    | 变量名           | 示例值                          | **说明** |
-    | :--------------- | :------------------------------ | :--------------------------------------------------------------------------- |
-    | `DOMAIN`         | `yourdomain.com`                | **【必填】** 你的主域名。                                                     |
-    | `DNS_API`        | `dns_ali`                       | **【必填】** DNS 提供商。`dns_ali` (阿里云) 或 `dns_dp` (腾讯云 DNSPod)。       |
-    | `API_KEY`        | `LTxxxxxxxxxxxxxx`              | **【必填】** 你的 DNS API Key (阿里云的 AccessKey ID 或腾讯云的 DP_Id)。       |
-    | `API_SECRET`     | `GZyyyyyyyyyyyyyyyy`            | **【必填】** 你的 DNS API Secret (阿里云的 AccessKey Secret 或腾讯云的 DP_Key)。 |
-    | `CERT_OUTPUT_PATH`| `/output`                      | **【保持不变】** 容器内证书输出路径，与上面设置的卷装载路径对应。               |
-    | `ACME_EMAIL`     | `your-real-email@gmail.com`     | **【建议填写】** 用于 Let's Encrypt
+1.  在 `src/notifiers` 目录下，创建一个新的 `your_notifier.py` 文件。
+2.  在该文件中，创建一个继承自 `BaseNotifier` 的新类（`from .base_notifier import BaseNotifier`）。
+3.  实现 `send(self, status: str, domain: str, details: str = "")` 方法，编写您自己的通知逻辑。
+4.  在 `src/notifiers/notification_manager.py` 的 `_discover_notifiers` 方法中，导入并实例化您的新类。
+5.  重新构建 Docker 镜像即可！

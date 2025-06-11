@@ -1,0 +1,14 @@
+{
+  "certificate": {
+    "output_path": "/output",
+    "key_filename": "privkey.pem",
+    "fullchain_filename": "fullchain.pem",
+    "cert_filename": "cert.pem",
+    "ca_filename": "ca.pem"
+  },
+  "notifiers": {
+    "wecom": {
+      "webhook_url": ""
+    }
+  }
+}
