@@ -15,9 +15,9 @@ class WecomNotifier(BaseNotifier):
         
         # 1. 尝试从配置文件加载 URL
         try:
-            # 更新配置文件的绝对路径
             with open('/app/src/config/config.json', 'r') as f:
-                config = json.load()
+                # !!! 关键修复：将文件对象 f 传递给 json.load() !!!
+                config = json.load(f)
             config_url = config.get('notifiers', {}).get('wecom', {}).get('webhook_url')
         except (FileNotFoundError, json.JSONDecodeError):
             # 配置文件不存在或格式错误，静默处理
@@ -31,7 +31,6 @@ class WecomNotifier(BaseNotifier):
         if self.webhook_url:
              logging.info("已加载企业微信 Webhook 配置。")
 
-    # send 方法保持不变，这里省略以保持简洁
     def send(self, status: str, domain: str, details: str = "") -> None:
         if not self.webhook_url:
             return

@@ -3,7 +3,6 @@ import sys
 import json
 import logging
 import subprocess
-# 导入路径不变，因为 Python 会自动将执行脚本的目录加入 path
 from notifiers.notification_manager import NotificationManager
 
 # --- 配置日志记录 ---
@@ -13,16 +12,14 @@ logging.basicConfig(level=logging.INFO,
 
 # --- 加载外部配置文件 ---
 try:
-    # 更新配置文件的绝对路径
     with open('/app/src/config/config.json', 'r') as f:
-        config = json.load()
+        # !!! 关键修复：将文件对象 f 传递给 json.load() !!!
+        config = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError) as e:
     logging.warning(f"无法加载或解析 config.json 文件: {e}。将使用默认值。")
     config = {"certificate": {}}
 
 # --- 从环境变量或配置文件读取配置 ---
-# (此部分及后续函数内容保持不变, 这里省略以保持简洁)
-# ...
 DOMAIN = os.environ.get('DOMAIN')
 DNS_API = os.environ.get('DNS_API')
 API_KEY = os.environ.get('API_KEY')
