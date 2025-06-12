@@ -7,7 +7,11 @@
   },
   "notifiers": {
     "wecom": {
-      "webhook_url": ""
+      "corp_id": "",
+      "corp_secret": "",
+      "agent_id": "",
+      "to_user": "@all",
+      "author": "证书续签助手"
     }
   }
 }
