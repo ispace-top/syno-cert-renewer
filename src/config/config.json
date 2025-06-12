@@ -1,4 +1,12 @@
 {
+  "general": {
+    "domain": "",
+    "dns_api": "",
+    "api_key": "",
+    "api_secret": "",
+    "acme_email": "",
+    "renew_days": 30
+  },
   "certificate": {
     "output_path": "/output",
     "key_filename": "privkey.pem",
@@ -10,8 +18,7 @@
       "corp_id": "",
       "corp_secret": "",
       "agent_id": "",
-      "to_user": "@all",
-      "author": "证书续签助手"
+      "to_user": "@all"
     }
   }
 }

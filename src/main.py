@@ -10,23 +10,29 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     stream=sys.stdout)
 
+# --- 定义统一的配置路径 ---
+CONFIG_FILE_PATH = '/config/config.json'
+
 # --- 加载外部配置文件 ---
 try:
-    with open('/app/src/config/config.json', 'r') as f:
+    with open(CONFIG_FILE_PATH, 'r') as f:
         config = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError) as e:
-    logging.warning(f"无法加载或解析 config.json 文件: {e}。将使用默认值。")
-    config = {"certificate": {}}
+    logging.warning(f"无法加载或解析 {CONFIG_FILE_PATH}: {e}。将使用空配置。")
+    config = {}
 
-# --- 从环境变量或配置文件读取配置 ---
-DOMAIN = os.environ.get('DOMAIN')
-DNS_API = os.environ.get('DNS_API')
-API_KEY = os.environ.get('API_KEY')
-API_SECRET = os.environ.get('API_SECRET')
-ACME_EMAIL = os.environ.get('ACME_EMAIL')
-RENEW_DAYS = os.environ.get('RENEW_DAYS', '30')
-
+# --- 分区加载配置 ---
+general_config = config.get('general', {})
 cert_config = config.get('certificate', {})
+
+# --- 从环境变量或配置文件读取配置 (环境变量优先级更高) ---
+DOMAIN = os.environ.get('DOMAIN') or general_config.get('domain')
+DNS_API = os.environ.get('DNS_API') or general_config.get('dns_api')
+API_KEY = os.environ.get('API_KEY') or general_config.get('api_key')
+API_SECRET = os.environ.get('API_SECRET') or general_config.get('api_secret')
+ACME_EMAIL = os.environ.get('ACME_EMAIL') or general_config.get('acme_email')
+RENEW_DAYS = str(os.environ.get('RENEW_DAYS') or general_config.get('renew_days') or '30')
+
 CERT_OUTPUT_PATH = os.environ.get('CERT_OUTPUT_PATH') or cert_config.get('output_path') or '/output'
 KEY_FILENAME = os.environ.get('KEY_FILENAME') or cert_config.get('key_filename') or 'privkey.pem'
 CERT_FILENAME = os.environ.get('CERT_FILENAME') or cert_config.get('cert_filename') or 'cert.pem'
@@ -36,10 +42,17 @@ CA_FILENAME = os.environ.get('CA_FILENAME') or cert_config.get('ca_filename') or
 def validate_config():
     """检查必要的环境变量是否都已设置"""
     global DOMAIN
-    required_vars = ['DOMAIN', 'DNS_API', 'API_KEY', 'API_SECRET', 'ACME_EMAIL']
-    missing_vars = [var for var in required_vars if not globals().get(var)]
+    # 核心参数现在可以从配置文件读取，但必须存在
+    required_vars = {
+        'DOMAIN': DOMAIN, 
+        'DNS_API': DNS_API, 
+        'API_KEY': API_KEY, 
+        'API_SECRET': API_SECRET, 
+        'ACME_EMAIL': ACME_EMAIL
+    }
+    missing_vars = [k for k, v in required_vars.items() if not v]
     if missing_vars:
-        logging.error(f"错误：缺少必要的环境变量: {', '.join(missing_vars)}")
+        logging.error(f"错误：缺少必要的配置项 (请在环境变量或 config.json 中设置): {', '.join(missing_vars)}")
         sys.exit(1)
     
     if DOMAIN.startswith('*.'):
