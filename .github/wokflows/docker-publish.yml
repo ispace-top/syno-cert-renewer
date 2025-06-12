@@ -1,0 +1,58 @@
+# GitHub Action 的名称
+name: Publish Multi-Platform Docker image
+
+# 此 Action 的触发条件：当一个新的 Release 被创建时
+on:
+  release:
+    types: [created]
+
+# Action 要执行的任务
+jobs:
+  build_and_push_image:
+    # 任务运行的环境，使用最新的 Ubuntu 系统
+    runs-on: ubuntu-latest
+
+    # 任务的步骤
+    steps:
+      # 第一步：检出（下载）你的 GitHub 项目代码到运行环境中
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 新增：设置 QEMU，这是实现跨平台构建的前提
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      # 新增：设置 Docker Buildx，这是执行多平台构建的工具
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      # 登录到 Docker Hub
+      # 它会使用我们之前在 GitHub Secrets 中设置的用户名和 Token
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 从 Release 事件中提取元数据（例如标签名称）
+      # 这使得我们可以用版本号（如 v1.1.0）来标记我们的镜像
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/syno-cert-renewer
+
+      # 构建并推送多平台 Docker 镜像
+      - name: Build and push multi-platform Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          # 关键改动：指定要构建的平台
+          platforms: linux/amd64,linux/arm64
+          # 推送镜像到 Docker Hub
+          push: true
+          # 为镜像打上标签，例如：
+          # your-username/syno-cert-renewer:latest
+          # your-username/syno-cert-renewer:v1.1.0
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
