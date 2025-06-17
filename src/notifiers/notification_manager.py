@@ -1,5 +1,5 @@
 import logging
-from .wecom_notifier import WecomAppNotifier
+from .wecom_notifier import WeComNotifier
 
 class NotificationManager:
     def __init__(self):
