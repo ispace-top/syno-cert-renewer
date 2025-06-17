@@ -15,19 +15,31 @@
 ---
 
 ## 项目结构
->syno-cert-renewer/
->├── src/
->│   ├── config/
->│   │   └── config.json              # 默认配置文件
->│   ├── notifiers/
->│   │   ├── init.py              # 将 notifiers 声明为 Python 包
->│   │   ├── base_notifier.py         # 通知服务的抽象基类 (接口)
->│   │   ├── notification_manager.py  # 通知管理器，负责分发消息
->│   │   └── wecom_notifier.py        # 企业微信通知的具体实现
->│   └── main.py                      # 主控逻辑脚本
->├── Dockerfile                       # 用于构建镜像的说明文件
->├── entrypoint.sh                    # Docker 容器的入口脚本
->└── README.md                        # 本说明文档
+syno-cert-renewer/
+
+├── src/
+
+│   ├── config/
+
+│   │   └── config.json              # 默认配置文件
+
+│   ├── notifiers/
+
+│   │   ├── init.py              # 将 notifiers 声明为 Python 包
+
+│   │   ├── base_notifier.py         # 通知服务的抽象基类 (接口)
+
+│   │   ├── notification_manager.py  # 通知管理器，负责分发消息
+
+│   │   └── wecom_notifier.py        # 企业微信通知的具体实现
+
+│   └── main.py                      # 主控逻辑脚本
+
+├── Dockerfile                       # 用于构建镜像的说明文件
+
+├── entrypoint.sh                    # Docker 容器的入口脚本
+
+└── README.md                        # 本说明文档
 
 ---
 
