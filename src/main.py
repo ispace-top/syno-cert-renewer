@@ -21,10 +21,6 @@ DNS_API = config_mgr.get('general.dns_api', 'DNS_API')
 ACME_EMAIL = config_mgr.get('general.acme_email', 'ACME_EMAIL')
 CERT_OUTPUT_PATH = config_mgr.get('general.cert_output_path', 'CERT_OUTPUT_PATH', '/output')
 
-# API 凭证 (强烈建议使用环境变量)
-API_KEY = os.environ.get('API_KEY')
-API_SECRET = os.environ.get('API_SECRET')
-
 # Synology 部署配置
 AUTO_DEPLOY_TO_SYNOLOGY = str(config_mgr.get('synology.auto_deploy', 'AUTO_DEPLOY_TO_SYNOLOGY', 'false')).lower() == 'true'
 SYNO_USERNAME = config_mgr.get('synology.username', 'SYNO_Username')
@@ -38,21 +34,20 @@ notification_mgr = NotificationManager()
 
 
 def validate_config():
-    """检查必要的配置是否都已设置"""
+    """检查核心的配置是否都已设置"""
     logging.info("开始验证配置...")
     
     required_vars = {
         'DOMAIN': DOMAIN,
         'DNS_API': DNS_API,
         'ACME_EMAIL': ACME_EMAIL,
-        # API_KEY 和 SECRET 必须通过环境变量设置，以策安全
-        'API_KEY (环境变量)': os.environ.get('API_KEY'),
-        'API_SECRET (环境变量)': os.environ.get('API_SECRET')
     }
+
+    # 注意：DNS 提供商的特定 API 凭证 (如 DP_Id, CF_Token) 由 acme.sh 自行验证。
+    # 如果缺失，acme.sh 会提供非常明确的错误信息，这比我们在这里做通用检查要好。
 
     if AUTO_DEPLOY_TO_SYNOLOGY:
         logging.info("检测到已启用 Synology 自动部署，将验证 DSM 相关配置。")
-        # 这些变量现在可以从 config.json 读取
         required_vars.update({
             'SYNO_Username': SYNO_USERNAME,
             'SYNO_Password': SYNO_PASSWORD,
@@ -88,9 +83,12 @@ def run_command(command, env_vars=None):
         logging.debug(f"输出:\n{process.stdout}")
         return True, process.stdout
     except subprocess.CalledProcessError as e:
-        error_output = f"命令 '{' '.join(command)}' 执行失败。\n返回码: {e.returncode}\n标准输出:\n{e.stdout}\n标准错误:\n{e.stderr}"
-        logging.error(error_output)
-        return False, e.stderr
+        # 将标准输出和标准错误都记录下来，因为acme.sh有时会将信息输出到stdout
+        error_output = f"标准输出:\n{e.stdout}\n标准错误:\n{e.stderr}"
+        full_error_log = f"命令 '{' '.join(command)}' 执行失败。\n返回码: {e.returncode}\n{error_output}"
+        logging.error(full_error_log)
+        # 返回合并后的错误信息，以便发送通知
+        return False, f"{e.stdout}\n{e.stderr}".strip()
 
 
 def setup_acme_account():
@@ -123,15 +121,15 @@ def issue_or_renew_cert():
         '--keylength', 'ec-256', '--log'
     ]
 
-    # 准备传递给 acme.sh 的环境变量
-    command_env = {
-        'API_KEY': API_KEY,
-        'API_SECRET': API_SECRET
-    }
+    # 【关键改动】
+    # 动态准备需要传递给 acme.sh 的环境变量。
+    # 这会自动抓取所有相关的 DNS 提供商的环境变量，例如 DP_Id, DP_Key, CF_Token 等。
+    dns_api_prefixes = ('DP_', 'CF_', 'ALI_', 'GD_', 'HE_', 'CLOUDXNS_', 'GODADDY_')
+    command_env = {k: v for k, v in os.environ.items() if k.startswith(dns_api_prefixes)}
 
     if AUTO_DEPLOY_TO_SYNOLOGY:
         logging.info("添加 synology_dsm 部署钩子到命令中。")
-        issue_command.extend(['--deploy-hook', 'synology_dsm'])
+        issue_command.extend(['--deploy-hook', 'synology_dsm','--debug 2'])
         # 将群晖凭证添加到命令的环境中，供部署钩子使用
         command_env.update({
             'SYNO_Username': SYNO_USERNAME,
@@ -143,9 +141,9 @@ def issue_or_renew_cert():
     success, output = run_command(issue_command, env_vars=command_env)
     
     if not success:
-        error_message = f"证书申请/续签失败。错误详情: {output}"
+        error_message = f"证书申请/续签失败。错误详情: \n{output}"
         logging.error(error_message)
-        return False, error_message
+        return False, output
     
     success_message = "证书申请/续签命令执行成功。"
     if AUTO_DEPLOY_TO_SYNOLOGY:
@@ -215,3 +213,4 @@ if __name__ == "__main__":
         logging.error("--- 证书自动化任务失败 ---")
         notification_mgr.dispatch("failure", DOMAIN, details=issue_error)
         sys.exit(1)
+
