@@ -15,9 +15,7 @@
 ---
 
 ## 项目结构
-
-
-syno-cert-renewer/
+>syno-cert-renewer/
 ├── src/
 │   ├── config/
 │   │   └── config.json              # 默认配置文件
