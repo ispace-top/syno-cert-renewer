@@ -129,7 +129,7 @@ def issue_or_renew_cert():
 
     if AUTO_DEPLOY_TO_SYNOLOGY:
         logging.info("添加 synology_dsm 部署钩子到命令中。")
-        issue_command.extend(['--deploy-hook', 'synology_dsm','--debug 2'])
+        issue_command.extend(['--deploy-hook', 'synology_dsm'])
         # 将群晖凭证添加到命令的环境中，供部署钩子使用
         command_env.update({
             'SYNO_Username': SYNO_USERNAME,
