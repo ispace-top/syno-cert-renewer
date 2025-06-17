@@ -8,8 +8,8 @@ from config_manager import ConfigManager
 
 class WeComNotifier(BaseNotifier):
     """
-    通过企业微信应用发送 Markdown 格式消息的通知器。
-    这种方式无需 media_id，更加稳定可靠。
+    通过企业微信应用发送纯文本格式消息的通知器。
+    这种方式可以确保在微信插件中也能正常显示。
     """
     def __init__(self):
         config_mgr = ConfigManager()
@@ -75,42 +75,48 @@ class WeComNotifier(BaseNotifier):
 
         token = self._get_access_token()
         if not token:
-            logging.error("无法发送 Markdown 消息，因为 access_token 获取失败。")
+            logging.error("无法发送消息，因为 access_token 获取失败。")
             return
 
-        if status == "success":
-            title = f"✅ <font color=\"info\">证书续签成功</font>"
-        else:
-            title = f"❌ <font color=\"warning\">证书续签失败</font>"
-        
-        # 将详情中的换行符处理一下，以在 Markdown 中正确显示
-        details_md = details.replace('\n', '\n>')
+        # --- 修改开始 ---
 
-        markdown_content = (
-            f"**{title}**\n"
-            f"> **域名**: {domain}\n"
-            f"> **状态**: {status.upper()}\n"
-            f"> **详情**: \n> {details_md if details else '无'}"
+        if status == "success":
+            title = "✅ 证书续签成功"
+        else:
+            title = "❌ 证书续签失败"
+        
+        # 准备纯文本内容
+        text_content = (
+            f"{title}\n"
+            f"域名: {domain}\n"
+            f"状态: {status.upper()}\n"
+            f"详情: {details if details else '无'}"
         )
 
         send_url = f"{self.api_origin}/cgi-bin/message/send?access_token={token}"
+        # 将 payload 修改为 text 类型
         payload = {
             "touser": self.touser,
-            "msgtype": "markdown",
+            "msgtype": "text",
             "agentid": self.agent_id,
-            "markdown": {
-                "content": markdown_content
-            }
+            "text": {
+                "content": text_content
+            },
+            "safe": 0,
+            "enable_id_trans": 0,
+            "enable_duplicate_check": 0,
+            "duplicate_check_interval": 1800
         }
+
+        # --- 修改结束 ---
 
         try:
             response = requests.post(send_url, json=payload, timeout=10)
             response.raise_for_status()
             result = response.json()
             if result.get("errcode") == 0:
-                logging.info("企业微信 Markdown 消息发送成功。")
+                logging.info("企业微信 text 消息发送成功。")
             else:
-                logging.error(f"企业微信 Markdown 消息发送失败: {result.get('errmsg')} (errcode: {result.get('errcode')})")
+                logging.error(f"企业微信 text 消息发送失败: {result.get('errmsg')} (errcode: {result.get('errcode')})")
         except requests.exceptions.RequestException as e:
-            logging.error(f"发送企业微信 Markdown 消息时发生网络错误: {e}")
-
+            logging.error(f"发送企业微信 text 消息时发生网络错误: {e}")
