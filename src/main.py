@@ -1,182 +1,217 @@
 import os
 import sys
-import json
 import logging
 import subprocess
 from notifiers.notification_manager import NotificationManager
+from config_manager import ConfigManager
 
-# --- 配置日志记录 ---
+# --- 日志基础配置 ---
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     stream=sys.stdout)
 
-# --- 定义统一的配置路径 ---
-CONFIG_FILE_PATH = '/config/config.json'
+# --- 初始化配置管理器 ---
+config_mgr = ConfigManager()
 
-# --- 加载外部配置文件 ---
-try:
-    with open(CONFIG_FILE_PATH, 'r') as f:
-        config = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError) as e:
-    logging.warning(f"无法加载或解析 {CONFIG_FILE_PATH}: {e}。将使用空配置。")
-    config = {}
+# --- 从配置和环境变量加载设置 (环境变量优先) ---
 
-# --- 分区加载配置 ---
-general_config = config.get('general', {})
-cert_config = config.get('certificate', {})
+# 基础配置
+DOMAIN = config_mgr.get('general.domain', 'DOMAIN')
+DNS_API = config_mgr.get('general.dns_api', 'DNS_API')
+ACME_EMAIL = config_mgr.get('general.acme_email', 'ACME_EMAIL')
+CERT_OUTPUT_PATH = config_mgr.get('general.cert_output_path', 'CERT_OUTPUT_PATH', '/output')
 
-# --- 从环境变量或配置文件读取配置 (环境变量优先级更高) ---
-DOMAIN = os.environ.get('DOMAIN') or general_config.get('domain')
-DNS_API = os.environ.get('DNS_API') or general_config.get('dns_api')
-API_KEY = os.environ.get('API_KEY') or general_config.get('api_key')
-API_SECRET = os.environ.get('API_SECRET') or general_config.get('api_secret')
-ACME_EMAIL = os.environ.get('ACME_EMAIL') or general_config.get('acme_email')
-RENEW_DAYS = str(os.environ.get('RENEW_DAYS') or general_config.get('renew_days') or '30')
+# API 凭证 (强烈建议使用环境变量)
+API_KEY = os.environ.get('API_KEY')
+API_SECRET = os.environ.get('API_SECRET')
 
-CERT_OUTPUT_PATH = os.environ.get('CERT_OUTPUT_PATH') or cert_config.get('output_path') or '/output'
-KEY_FILENAME = os.environ.get('KEY_FILENAME') or cert_config.get('key_filename') or 'privkey.pem'
-CERT_FILENAME = os.environ.get('CERT_FILENAME') or cert_config.get('cert_filename') or 'cert.pem'
-CA_FILENAME = os.environ.get('CA_FILENAME') or cert_config.get('ca_filename') or 'ca.pem'
+# Synology 部署配置
+AUTO_DEPLOY_TO_SYNOLOGY = str(config_mgr.get('synology.auto_deploy', 'AUTO_DEPLOY_TO_SYNOLOGY', 'false')).lower() == 'true'
+SYNO_USERNAME = config_mgr.get('synology.username', 'SYNO_Username')
+SYNO_PASSWORD = config_mgr.get('synology.password', 'SYNO_Password')
+SYNO_PORT = config_mgr.get('synology.port', 'SYNO_Port')
+SYNO_PROTOCOL = config_mgr.get('synology.protocol', 'SYNO_Protocol')
+
+
+# 初始化通知管理器
+notification_mgr = NotificationManager()
 
 
 def validate_config():
-    """检查必要的环境变量是否都已设置"""
-    global DOMAIN
-    # 核心参数现在可以从配置文件读取，但必须存在
+    """检查必要的配置是否都已设置"""
+    logging.info("开始验证配置...")
+    
     required_vars = {
-        'DOMAIN': DOMAIN, 
-        'DNS_API': DNS_API, 
-        'API_KEY': API_KEY, 
-        'API_SECRET': API_SECRET, 
-        'ACME_EMAIL': ACME_EMAIL
+        'DOMAIN': DOMAIN,
+        'DNS_API': DNS_API,
+        'ACME_EMAIL': ACME_EMAIL,
+        # API_KEY 和 SECRET 必须通过环境变量设置，以策安全
+        'API_KEY (环境变量)': os.environ.get('API_KEY'),
+        'API_SECRET (环境变量)': os.environ.get('API_SECRET')
     }
+
+    if AUTO_DEPLOY_TO_SYNOLOGY:
+        logging.info("检测到已启用 Synology 自动部署，将验证 DSM 相关配置。")
+        # 这些变量现在可以从 config.json 读取
+        required_vars.update({
+            'SYNO_Username': SYNO_USERNAME,
+            'SYNO_Password': SYNO_PASSWORD,
+            'SYNO_Port': SYNO_PORT,
+            'SYNO_Protocol': SYNO_PROTOCOL
+        })
+
     missing_vars = [k for k, v in required_vars.items() if not v]
     if missing_vars:
-        logging.error(f"错误：缺少必要的配置项 (请在环境变量或 config.json 中设置): {', '.join(missing_vars)}")
+        error_msg = f"错误：缺少必要的配置项: {', '.join(missing_vars)}。请在环境变量或 config.json 中设置它们。"
+        logging.error(error_msg)
+        notification_mgr.dispatch("failure", DOMAIN, details=error_msg)
         sys.exit(1)
-    
-    if DOMAIN.startswith('*.'):
-        original_domain = DOMAIN
-        DOMAIN = DOMAIN[2:]
-        logging.warning(f"检测到域名输入为 '{original_domain}'，已自动修正为基础域名: '{DOMAIN}'")
         
-    if DNS_API.lower() not in ['dns_dp', 'dns_ali']:
-        logging.error(f"错误: 不支持的 DNS_API '{DNS_API}'.")
-        sys.exit(1)
-    
-    logging.info("环境变量配置验证通过。")
-    logging.info(f"证书将在到期前 {RENEW_DAYS} 天进行续签。")
+    logging.info("配置验证通过。")
 
-def run_command(command, suppress_errors=False):
-    """执行 shell 命令并记录输出, 返回 (bool, str)"""
-    logging.info(f"执行命令: {' '.join(command)}")
+
+def run_command(command, env_vars=None):
+    """执行一个 shell 命令并返回成功状态和输出"""
+    env = os.environ.copy()
+    if env_vars:
+        env.update(env_vars)
+        
     try:
         process = subprocess.run(
-            command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8'
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env
         )
-        if process.stdout: logging.info(f"命令输出:\n{process.stdout}")
-        if process.stderr: logging.warning(f"命令错误输出:\n{process.stderr}")
-        return True, ""
+        logging.info(f"命令 '{' '.join(command)}' 执行成功。")
+        logging.debug(f"输出:\n{process.stdout}")
+        return True, process.stdout
     except subprocess.CalledProcessError as e:
-        error_message = e.stderr or e.stdout
-        if not suppress_errors:
-            logging.error(f"命令执行失败! 返回码: {e.returncode}")
-            if e.stdout: logging.error(f"失败输出:\n{e.stdout}")
-            if e.stderr: logging.error(f"失败错误输出:\n{e.stderr}")
-        return False, error_message
-        
-def set_api_credentials():
-    logging.info(f"为 {DNS_API} 设置 API 凭证...")
-    if DNS_API.lower() == 'dns_dp':
-        os.environ['DP_Id'] = API_KEY
-        os.environ['DP_Key'] = API_SECRET
-    elif DNS_API.lower() == 'dns_ali':
-        os.environ['Ali_Key'] = API_KEY
-        os.environ['Ali_Secret'] = API_SECRET
-    logging.info("API 凭证设置完成。")
+        error_output = f"命令 '{' '.join(command)}' 执行失败。\n返回码: {e.returncode}\n标准输出:\n{e.stdout}\n标准错误:\n{e.stderr}"
+        logging.error(error_output)
+        return False, e.stderr
 
-def setup_acme_sh():
+
+def setup_acme_account():
+    """注册 acme.sh 账户并设置默认 CA"""
+    logging.info("正在设置 acme.sh 账户...")
     acme_sh_path = '/root/.acme.sh/acme.sh'
-    logging.info("设置 acme.sh 默认 CA 为 Let's Encrypt...")
-    run_command([acme_sh_path, '--set-default-ca', '--server', 'letsencrypt'], suppress_errors=True)
     
-    logging.info(f"设置证书自动续订周期为 {RENEW_DAYS} 天...")
-    run_command([acme_sh_path, '--set-renew-days', RENEW_DAYS], suppress_errors=True)
+    register_cmd = [acme_sh_path, '--register-account', '-m', ACME_EMAIL]
+    success, _ = run_command(register_cmd)
+    if not success:
+        logging.warning("账户注册命令失败，可能已经注册。将继续执行。")
+
+    set_ca_cmd = [acme_sh_path, '--set-default-ca', '--server', 'letsencrypt']
+    success, _ = run_command(set_ca_cmd)
+    if not success:
+        logging.error("设置默认 CA 失败。")
+        return False
+        
+    return True
+
 
 def issue_or_renew_cert():
+    """执行证书申请或续签的核心逻辑"""
     logging.info(f"开始为域名 *. {DOMAIN} 和 {DOMAIN} 申请/续签证书...")
     acme_sh_path = '/root/.acme.sh/acme.sh'
+    
     issue_command = [
         acme_sh_path, '--issue', '--dns', DNS_API,
         '-d', DOMAIN, '-d', f'*.{DOMAIN}',
         '--keylength', 'ec-256', '--log'
     ]
-    success, error_output = run_command(issue_command)
+
+    # 准备传递给 acme.sh 的环境变量
+    command_env = {
+        'API_KEY': API_KEY,
+        'API_SECRET': API_SECRET
+    }
+
+    if AUTO_DEPLOY_TO_SYNOLOGY:
+        logging.info("添加 synology_dsm 部署钩子到命令中。")
+        issue_command.extend(['--deploy-hook', 'synology_dsm'])
+        # 将群晖凭证添加到命令的环境中，供部署钩子使用
+        command_env.update({
+            'SYNO_Username': SYNO_USERNAME,
+            'SYNO_Password': SYNO_PASSWORD,
+            'SYNO_Port': str(SYNO_PORT),
+            'SYNO_Protocol': SYNO_PROTOCOL
+        })
+
+    success, output = run_command(issue_command, env_vars=command_env)
+    
     if not success:
-        logging.error("证书申请/续签失败。")
-        return False, error_output
-    logging.info("证书申请/续签命令执行成功。")
+        error_message = f"证书申请/续签失败。错误详情: {output}"
+        logging.error(error_message)
+        return False, error_message
+    
+    success_message = "证书申请/续签命令执行成功。"
+    if AUTO_DEPLOY_TO_SYNOLOGY:
+        success_message += " 已触发部署到 Synology DSM 的流程。"
+    
+    logging.info(success_message)
     return True, ""
+
 
 def install_cert():
-    full_key_path = os.path.join(CERT_OUTPUT_PATH, KEY_FILENAME)
-    full_cert_path = os.path.join(CERT_OUTPUT_PATH, CERT_FILENAME)
-    full_ca_path = os.path.join(CERT_OUTPUT_PATH, CA_FILENAME)
-    
-    logging.info(f"准备将证书安装到指定位置...")
-    
-    if not os.path.exists(CERT_OUTPUT_PATH):
-        try:
-            os.makedirs(CERT_OUTPUT_PATH)
-            logging.info(f"目录 {CERT_OUTPUT_PATH} 创建成功。")
-        except OSError as e:
-            logging.error(f"创建目录 {CERT_OUTPUT_PATH} 失败: {e}")
-            return False, str(e)
-
+    """将生成的证书文件拷贝到指定的输出目录"""
+    logging.info(f"开始将证书安装到输出目录: {CERT_OUTPUT_PATH}")
     acme_sh_path = '/root/.acme.sh/acme.sh'
-    install_command = [
-        acme_sh_path, '--install-cert', '-d', DOMAIN, '--ecc',
-        '--key-file', full_key_path,
-        '--cert-file', full_cert_path,
-        '--ca-file', full_ca_path
-    ]
-    success, error_output = run_command(install_command)
-    if not success:
-        logging.error("证书安装失败。")
-        return False, error_output
-    logging.info(f"证书及密钥文件已成功安装到 {CERT_OUTPUT_PATH} 目录。")
-    return True, ""
-
-if __name__ == "__main__":
-    notification_mgr = NotificationManager()
     
     try:
-        logging.info("--- 开始执行证书自动化任务 ---")
+        os.makedirs(CERT_OUTPUT_PATH, exist_ok=True)
+    except OSError as e:
+        error_msg = f"创建输出目录 {CERT_OUTPUT_PATH} 失败: {e}"
+        logging.error(error_msg)
+        return False, error_msg
+
+    install_command = [
+        acme_sh_path, '--install-cert',
+        '-d', DOMAIN,
+        '--key-file', os.path.join(CERT_OUTPUT_PATH, 'privkey.pem'),
+        '--fullchain-file', os.path.join(CERT_OUTPUT_PATH, 'fullchain.pem'),
+        '--reloadcmd', 'echo "Certificate installed."'
+    ]
+
+    success, error_output = run_command(install_command)
+    if not success:
+        error_message = f"将证书文件安装到 {CERT_OUTPUT_PATH} 失败: {error_output}"
+        logging.error(error_message)
+        return False, error_message
+
+    logging.info(f"证书已成功安装到 {CERT_OUTPUT_PATH}")
+    return True, ""
+
+
+if __name__ == "__main__":
+    logging.info("--- Synology 证书续签工具启动 ---")
+    
+    validate_config()
+    
+    if not setup_acme_account():
+        error_msg = "acme.sh 账户设置失败，程序终止。"
+        logging.error(error_msg)
+        notification_mgr.dispatch("failure", DOMAIN, details=error_msg)
+        sys.exit(1)
+
+    issue_success, issue_error = issue_or_renew_cert()
+
+    if issue_success:
+        install_success, install_error = install_cert()
         
-        validate_config()
-        set_api_credentials()
-        setup_acme_sh()
-        
-        issue_success, issue_error = issue_or_renew_cert()
-        if issue_success:
-            install_success, install_error = install_cert()
-            if install_success:
-                logging.info("--- 证书自动化任务成功完成 ---")
-                notification_mgr.dispatch("success", DOMAIN)
-            else:
-                error_details = f"证书安装失败: {install_error}"
-                logging.error(f"--- 任务失败于证书安装阶段 ---: {error_details}")
-                notification_mgr.dispatch("failure", DOMAIN, details=error_details)
-                sys.exit(1)
+        if install_success:
+            success_details = f"证书已成功续签并保存到 {CERT_OUTPUT_PATH}。"
+            if AUTO_DEPLOY_TO_SYNOLOGY:
+                success_details += "\n已尝试自动部署到 Synology DSM。"
+            logging.info("--- 证书自动化任务成功完成 ---")
+            notification_mgr.dispatch("success", DOMAIN, details=success_details)
         else:
-            error_details = f"证书申请失败: {issue_error}"
-            logging.error(f"--- 任务失败于证书申请/续签阶段 ---: {error_details}")
-            notification_mgr.dispatch("failure", DOMAIN, details=error_details)
-            sys.exit(1)
-            
-    except Exception as e:
-        domain_for_notification = DOMAIN if 'DOMAIN' in globals() and DOMAIN else "未知"
-        error_details = f"脚本发生严重错误: {e}"
-        logging.critical(f"--- {error_details} ---", exc_info=True)
-        notification_mgr.dispatch("failure", domain_for_notification, details=error_details)
+            warning_details = f"证书续签/部署到 DSM 可能已成功，但保存证书到 {CERT_OUTPUT_PATH} 失败: {install_error}"
+            logging.warning(warning_details)
+            notification_mgr.dispatch("success", DOMAIN, details=warning_details)
+    else:
+        logging.error("--- 证书自动化任务失败 ---")
+        notification_mgr.dispatch("failure", DOMAIN, details=issue_error)
         sys.exit(1)
