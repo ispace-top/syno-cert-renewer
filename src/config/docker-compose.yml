@@ -1,0 +1,47 @@
+## 示例docker-compose.yml文件，根据实际情况修改。
+version: '3.8'
+
+services:
+  cert-renewer:
+    image: syno-cert-renewer:latest 
+    container_name: syno-cert-renewer
+    restart: unless-stopped
+    volumes:
+      # 挂载输出目录，用于存放生成的证书文件
+      - ./output:/output 
+      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录
+      - ./temp:/temp
+      # (可选) 挂载配置文件目录
+      - ./config:/config
+    environment:
+      # --- 基础配置 ---
+      - DOMAIN=
+      - DNS_API=           # 您的 DNS 提供商 API (例如: dns_dp DNSPod)
+      - ACME_EMAIL=
+      - DP_Id=             # API Token
+      - DP_Key=            # 某些提供商需要， Account ID
+
+      # --- (可选) 自动部署到 Synology DSM (密码等敏感信息建议写入 config.json) ---
+      - AUTO_DEPLOY_TO_SYNOLOGY=true
+      - SYNO_Username=         # <-- 已修正: USERNAME -> Username
+      - SYNO_Password=         # <-- 已修正: PASSWORD -> Password
+      - SYNO_Port=             # <-- 群晖服务端口
+      - SYNO_Protocol=
+    
+      - SYNO_Scheme=""         # <-- 协议：http or https
+      - SYNO_Hostname=""       # <-- 群晖地址
+      - SYNO_Create=
+      - SYNO_Certificate=""
+
+      # --- (可选) 企业微信通知配置 ---
+      - WECOM_CORP_ID=
+      - WECOM_CORP_SECRET=
+      - WECOM_AGENT_ID=
+      - WECOM_MEDIA_ID=
+      - WECOM_TOUSER=  # 接收者, @all 表示所有
+      
+      # --- (可选) 定时任务配置 ---
+      - CRON_SCHEDULE=0 3 * * * # 默认每天凌晨3点执行
+
+    cap_add:
+      - NET_ADMIN
