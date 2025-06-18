@@ -28,11 +28,11 @@ jobs:
 
       # 登录到 Docker Hub
       # 它会使用我们之前在 GitHub Secrets 中设置的用户名和 Token
-     - name: Log in to Docker Hub
-  uses: docker/login-action@v3  # 升级到v3版本
-  with:
-    username: ${{ secrets.DOCKER_USERNAME }}
-    password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3  # 升级到v3版本
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       # 从 Release 事件中提取元数据（例如标签名称）
       # 这使得我们可以用版本号（如 v1.1.0）来标记我们的镜像
