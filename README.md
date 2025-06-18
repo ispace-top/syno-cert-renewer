@@ -1,15 +1,26 @@
 # Synology Cert Renewer
 
+[![GitHub Release](https://img.shields.io/github/v/release/ispace-top/syno-cert-renewer?style=for-the-badge&logo=github)](https://github.com/ispace-top/syno-cert-renewer/releases)
+[![Docker Image Build Status](https://img.shields.io/github/actions/workflow/status/ispace-top/syno-cert-renewer/docker-image.yml?branch=main&label=Docker%20Image&logo=docker&style=for-the-badge)](https://github.com/ispace-top/syno-cert-renewer/actions/workflows/docker-image.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/ispace/syno-cert-renewer?style=for-the-badge&logo=docker)](https://hub.docker.com/r/ispace/syno-cert-renewer)
+
+---
+
 这是一个强大且易于部署的 Docker 化工具，专为群晖 (Synology) NAS 用户设计。它能自动为您申请和续签 Let's Encrypt 泛域名证书，支持自动部署到 DSM 系统，并通过企业微信应用发送通知，确保您的证书始终有效，且重要信息不遗漏。
 
 ## ✨ 特点概览
 
-- **全自动化**: 一次设置，通过 Cron 定时任务实现证书的自动续签，省心省力。
-- **泛域名支持**: 利用 DNS Challenge 模式，轻松申请 `your.domain` 和 `*.your.domain` 的泛域名证书。
-- **Docker 部署**: 提供干净、隔离、高度可移植的运行环境，部署和迁移极为简便。
-- **灵活配置**: 支持通过环境变量或挂载 `config.json` 文件进行配置，环境变量优先级更高，方便集成到不同环境。
-- **企业微信通知**: 集成标准企业微信应用消息通知 (支持 `corpid`, `corpsecret`, `agentid`)，而非简单的 Webhook，确保消息送达可靠。
-- **自动部署 DSM**: 自动化将新签发的证书安全导入到群晖 DSM 的证书库中，无需手动操作。
+* **全自动化**: 一次设置，通过 Cron 定时任务实现证书的自动续签，省心省力。
+
+* **泛域名支持**: 利用 DNS Challenge 模式，轻松申请 `your.domain` 和 `*.your.domain` 的泛域名证书。
+
+* **Docker 部署**: 提供干净、隔离、高度可移植的运行环境，部署和迁移极为简便。
+
+* **灵活配置**: 支持通过环境变量或挂载 `config.json` 文件进行配置，环境变量优先级更高，方便集成到不同环境。
+
+* **企业微信通知**: 集成标准企业微信应用消息通知 (支持 `corpid`, `corpsecret`, `agentid`)，而非简单的 Webhook，确保消息送达可靠。
+
+* **自动部署 DSM**: 自动化将新签发的证书安全导入到群晖 DSM 的证书库中，无需手动操作。
 
 ## 🚀 如何使用
 
@@ -24,9 +35,13 @@
 如果您希望接收证书续签通知，需要在企业微信后台创建一个应用。
 
 1. 登录 [企业微信管理后台](https://work.weixin.com/)。
+
 2. 导航至「应用管理」 -> 「应用」 -> 「自建」，点击「创建应用」。
+
 3. 创建应用后，您将获得 `AgentId` 和 `Secret`。
+
 4. 在「我的企业」页面，您可以找到您的 `企业ID (CorpID)`。
+
 5. `touser` 参数用于指定消息接收者，`@all` 表示发送给应用可见范围内的所有成员。
 
 ### 3. 编写 `docker-compose.yml` 文件
@@ -35,7 +50,7 @@
 
 创建一个 `docker-compose.yml` 文件，并根据您的实际情况进行修改：
 
-```
+```yaml
 version: '3.8'
 
 services:
@@ -92,7 +107,7 @@ services:
 
 在 `./config/config.json` 路径下创建您的配置文件，例如：
 
-```
+```json
 {
   "general": {
     "domain": "your.domain.com",
@@ -126,7 +141,7 @@ services:
 
 在 `docker-compose.yml` 文件所在的目录执行以下命令：
 
-```
+```bash
 # 首先创建必要的本地目录，用于挂载数据
 mkdir -p ./output ./temp ./config
 
@@ -168,3 +183,5 @@ docker-compose up -d
 ## 📄 许可证
 
 本项目采用 [MIT 许可证](LICENSE)。
+
+---
