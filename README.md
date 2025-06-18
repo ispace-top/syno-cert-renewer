@@ -2,7 +2,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/ispace-top/syno-cert-renewer?style=for-the-badge&logo=github)](https://github.com/ispace-top/syno-cert-renewer/releases)
 [![Docker Image Build Status](https://img.shields.io/github/actions/workflow/status/ispace-top/syno-cert-renewer/docker-image.yml?branch=main&label=Docker%20Image&logo=docker&style=for-the-badge)](https://github.com/ispace-top/syno-cert-renewer/actions/workflows/docker-image.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/ispace/syno-cert-renewer?style=for-the-badge&logo=docker)](https://hub.docker.com/r/ispace/syno-cert-renewer)
+[![Docker Pulls](https://img.shields.io/docker/pulls/ispace/syno-cert-renewer?style=for-the-badge&logo=docker)](https://hub.docker.com/r/wapedkj/syno-cert-renewer)
 
 ---
 
