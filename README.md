@@ -1,9 +1,9 @@
 # Synology Cert Renewer
 
 [![GitHub Release](https://img.shields.io/github/v/release/ispace-top/syno-cert-renewer?style=for-the-badge&logo=github)](https://github.com/ispace-top/syno-cert-renewer/releases)
-[![Docker Image Build Status](https://img.shields.io/github/actions/workflow/status/ispace-top/syno-cert-renewer/docker-image.yml?branch=main&label=Docker%20Image&logo=docker&style=for-the-badge)](https://github.com/ispace-top/syno-cert-renewer/actions/workflows/docker-image.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/ispace/syno-cert-renewer?style=for-the-badge&logo=docker)](https://hub.docker.com/r/wapedkj/syno-cert-renewer)
-
+  [![Docker Image Build Status](https://img.shields.io/github/actions/workflow/status/ispace-top/syno-cert-renewer/docker-image.yml?branch=main&label=Docker%20Image&logo=docker&style=for-the-badge)](https://github.com/ispace-top/syno-cert-renewer/actions/workflows/docker-image.yml)
+  [![Docker Pulls](https://img.shields.io/docker/pulls/wapedkj/syno-cert-renewer?style=for-the-badge&logo=docker)](https://hub.docker.com/r/wapedkj/syno-cert-renewer)
+  [![Docker Image Version](https://img.shields.io/docker/v/wapedkj/syno-cert-renewer/latest?style=for-the-badge&label=docker%20image%20version)](https://hub.docker.com/r/wapedkj/syno-cert-renewer/tags)
 ---
 
 这是一个强大且易于部署的 Docker 化工具，专为群晖 (Synology) NAS 用户设计。它能自动为您申请和续签 Let's Encrypt 泛域名证书，支持自动部署到 DSM 系统，并通过企业微信应用发送通知，确保您的证书始终有效，且重要信息不遗漏。
