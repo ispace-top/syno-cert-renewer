@@ -1,109 +1,122 @@
 import os
 import json
-import logging
-import requests
 import time
-from datetime import datetime
+import requests
+import logging
 from .base_notifier import BaseNotifier
+from config_manager import ConfigManager
 
-class WecomAppNotifier(BaseNotifier):
+class WeComNotifier(BaseNotifier):
     """
-    企业微信内部应用通知的实现类。
+    通过企业微信应用发送纯文本格式消息的通知器。
+    这种方式可以确保在微信插件中也能正常显示。
     """
     def __init__(self):
-        self.corp_id = None # 默认为 None，表示禁用
-        config = self._load_config()
-        wecom_config = config.get('notifiers', {}).get('wecom', {})
+        config_mgr = ConfigManager()
+        self.corp_id = config_mgr.get("notifiers.wecom.corp_id", "WECOM_CORP_ID")
+        self.corp_secret = config_mgr.get("notifiers.wecom.corp_secret", "WECOM_CORP_SECRET")
+        self.agent_id = config_mgr.get("notifiers.wecom.agent_id", "WECOM_AGENT_ID")
+        self.touser = config_mgr.get("notifiers.wecom.touser", "WECOM_TOUSER", "@all")
 
-        # 从环境变量或配置文件加载配置 (环境变量优先)
-        self.corp_id = os.environ.get('CORP_ID') or wecom_config.get('corp_id')
-        self.corp_secret = os.environ.get('CORP_SECRET') or wecom_config.get('corp_secret')
-        self.agent_id = os.environ.get('AGENT_ID') or wecom_config.get('agent_id')
-        self.to_user = os.environ.get('TO_USER') or wecom_config.get('to_user') or "@all"
-        
-        self._access_token = None
-        self._token_expires_at = 0
-
-        if self.corp_id and self.corp_secret and self.agent_id:
-            logging.info("已加载企业微信应用通知配置。")
-        else:
-            self.corp_id = None # 确保配置不完整时禁用
-
-    def _load_config(self):
-        """从标准路径加载配置文件"""
-        try:
-            with open('/config/config.json', 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            # 如果文件不存在或无效，返回空字典
-            return {}
+        self.api_origin = "https://qyapi.weixin.qq.com"
+        self.token_cache_path = "/temp/wecom_token.json"
+        self.access_token = None
+        self.token_expires_at = 0
 
     def _get_access_token(self):
-        """获取或刷新 access_token"""
-        if self._token_expires_at > time.time() and self._access_token:
-            return self._access_token
+        """高效地获取并缓存 access_token。"""
+        if self.access_token and time.time() < self.token_expires_at:
+            return self.access_token
 
-        logging.info("正在获取新的 access_token...")
-        url = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
-        params = {"corpid": self.corp_id, "corpsecret": self.corp_secret}
         try:
-            response = requests.get(url, params=params, timeout=10)
+            if os.path.exists(self.token_cache_path):
+                with open(self.token_cache_path, "r") as f:
+                    cache = json.load(f)
+                    if time.time() < cache.get("expires_at", 0):
+                        self.access_token = cache.get("access_token")
+                        self.token_expires_at = cache.get("expires_at")
+                        logging.info("从文件缓存加载了有效的 access_token。")
+                        return self.access_token
+        except (IOError, json.JSONDecodeError) as e:
+            logging.warning(f"读取 token 缓存文件失败: {e}，将重新获取。")
+
+        logging.info("access_token 无效或已过期，正在从企业微信 API 获取新的 token...")
+        if not all([self.corp_id, self.corp_secret]):
+            logging.error("获取 access_token 失败: corp_id 或 corp_secret 未配置。")
+            return None
+            
+        url = f"{self.api_origin}/cgi-bin/gettoken?corpid={self.corp_id}&corpsecret={self.corp_secret}"
+        try:
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
             if data.get("errcode") == 0:
-                self._access_token = data.get("access_token")
-                self._token_expires_at = time.time() + 7000
-                logging.info("成功获取 access_token。")
-                return self._access_token
+                self.access_token = data.get("access_token")
+                self.token_expires_at = time.time() + data.get("expires_in", 7200) - 200
+                try:
+                    with open(self.token_cache_path, "w") as f:
+                        json.dump({"access_token": self.access_token, "expires_at": self.token_expires_at}, f)
+                    logging.info("成功获取并缓存了新的 access_token。")
+                except IOError as e:
+                    logging.warning(f"写入 token 缓存文件失败: {e}")
+                return self.access_token
             else:
-                logging.error(f"获取 access_token 失败: {data.get('errmsg')}")
+                logging.error(f"获取 access_token 失败: {data.get('errmsg')} (errcode: {data.get('errcode')})")
                 return None
         except requests.exceptions.RequestException as e:
-            logging.error(f"获取 access_token 时发生网络错误: {e}")
+            logging.error(f"请求 access_token 时发生网络错误: {e}")
             return None
 
-    def send(self, status: str, domain: str, details: str = ""):
-        # (此方法内容保持不变, 这里省略以保持简洁)
-        if not self.corp_id:
+    def send(self, status, domain, details=""):
+        """主发送方法，被 NotificationManager 调用。"""
+        if not all([self.corp_id, self.corp_secret, self.agent_id]):
+            logging.warning("企业微信通知缺少必要的参数 (corp_id, corp_secret, agent_id)，跳过发送。")
             return
 
-        access_token = self._get_access_token()
-        if not access_token:
-            logging.error("无法发送通知，因为获取 access_token 失败。")
+        token = self._get_access_token()
+        if not token:
+            logging.error("无法发送消息，因为 access_token 获取失败。")
             return
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # --- 修改开始 ---
 
         if status == "success":
-            title = f"✅ 证书续签成功: {domain}"
-            description = f"<div class=\"gray\">{now_str}</div><div class=\"normal\">域名 {domain} 的泛域名证书已成功续签并部署！</div>"
+            title = "✅ 证书续签成功"
         else:
-            title = f"❌ 证书续签失败: {domain}"
-            description = f"<div class=\"gray\">{now_str}</div><div class=\"highlight\">域名 {domain} 证书续签失败，请检查容器日志。</div>"
+            title = "❌ 证书续签失败"
+        
+        # 准备纯文本内容
+        text_content = (
+            f"{title}\n"
+            f"域名: {domain}\n"
+            f"状态: {status.upper()}\n"
+            f"详情: {details if details else '无'}"
+        )
 
+        send_url = f"{self.api_origin}/cgi-bin/message/send?access_token={token}"
+        # 将 payload 修改为 text 类型
         payload = {
-            "touser": self.to_user,
-            "msgtype": "textcard",
-            "agentid": int(self.agent_id),
-            "textcard": {
-                "title": title,
-                "description": description,
-                "url": "https://github.com/acmesh-official/acme.sh",
-                "btntxt": "了解更多"
+            "touser": self.touser,
+            "msgtype": "text",
+            "agentid": self.agent_id,
+            "text": {
+                "content": text_content
             },
-            "enable_id_trans": 0
+            "safe": 0,
+            "enable_id_trans": 0,
+            "enable_duplicate_check": 0,
+            "duplicate_check_interval": 1800
         }
 
-        send_url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={access_token}"
+        # --- 修改结束 ---
+
         try:
-            logging.info("正在发送企业微信应用通知...")
             response = requests.post(send_url, json=payload, timeout=10)
             response.raise_for_status()
             result = response.json()
             if result.get("errcode") == 0:
-                logging.info("企业微信应用通知发送成功。")
+                logging.info("企业微信 text 消息发送成功。")
             else:
-                logging.error(f"企业微信应用通知发送失败: {result}")
+                logging.error(f"企业微信 text 消息发送失败: {result.get('errmsg')} (errcode: {result.get('errcode')})")
         except requests.exceptions.RequestException as e:
-            logging.error(f"发送企业微信应用通知时发生网络错误: {e}")
-
+            logging.error(f"发送企业微信 text 消息时发生网络错误: {e}")

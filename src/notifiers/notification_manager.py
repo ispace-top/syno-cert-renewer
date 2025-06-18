@@ -1,31 +1,29 @@
-import logging
-from .wecom_notifier import WecomAppNotifier
+from .wecom_notifier import WeComNotifier
 
 class NotificationManager:
     def __init__(self):
+        """
+        初始化通知管理器并加载所有可用的通知器。
+        """
         self.notifiers = []
-        self._discover_notifiers()
+        # 在这里可以添加更多的通知器
+        # 我们现在正确地实例化 WeComNotifier 类
+        self.notifiers.append(WeComNotifier())
 
-    def _discover_notifiers(self):
+    def dispatch(self, status, domain, details=""):
         """
-        初始化并添加所有可用的通知器。
+        分发通知到所有已注册的通知器。
         """
-        # 添加企业微信应用通知器
-        self.notifiers.append(WecomAppNotifier())
-        
-        logging.info(f"已加载 {len(self.notifiers)} 个通知服务。")
+        if not self.notifiers:
+            print("没有配置任何通知器。")
+            return
 
-    def dispatch(self, status: str, domain: str, details: str = ""):
-        """
-        将通知分发到所有已注册的通知器。
-        """
-        if not any(n.corp_id for n in self.notifiers if isinstance(n, WecomAppNotifier)): # 示例检查
-             logging.info("没有配置任何有效的通知服务，跳过发送。")
-             return
-            
-        logging.info(f"正在向所有已配置的服务分发 '{status}' 通知...")
+        print(f"正在向 {len(self.notifiers)} 个通知器分发消息...")
         for notifier in self.notifiers:
             try:
+                # 调用每个通知器实例的 send 方法
                 notifier.send(status, domain, details)
             except Exception as e:
-                logging.error(f"发送通知时发生错误 ({type(notifier).__name__}): {e}", exc_info=True)
+                # 增加错误捕获，防止一个通知器的失败影响其他通知器
+                print(f"发送通知时遇到错误: {e}")
+

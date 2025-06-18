@@ -1,24 +1,23 @@
 {
   "general": {
-    "domain": "",
-    "dns_api": "",
-    "api_key": "",
-    "api_secret": "",
-    "acme_email": "",
-    "renew_days": 30
+    "domain": "your.domain.com",
+    "dns_api": "dns_cf",
+    "acme_email": "youremail@example.com",
+    "cert_output_path": "/output"
   },
-  "certificate": {
-    "output_path": "/output",
-    "key_filename": "privkey.pem",
-    "cert_filename": "cert.pem",
-    "ca_filename": "ca.pem"
+  "synology": {
+    "auto_deploy": true,
+    "username": "your_dsm_admin_user",
+    "password": "your_dsm_admin_password",
+    "port": 5001,
+    "protocol": "https"
   },
   "notifiers": {
     "wecom": {
-      "corp_id": "",
-      "corp_secret": "",
-      "agent_id": "",
-      "to_user": "@all"
+      "corp_id": "your_corp_id_from_config",
+      "corp_secret": "your_corp_secret_from_config",
+      "agent_id": "your_agent_id_from_config",
+      "touser": "@all"
     }
   }
 }
