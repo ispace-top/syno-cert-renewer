@@ -22,6 +22,8 @@
 
 * **自动部署 DSM**: 自动化将新签发的证书安全导入到群晖 DSM 的证书库中，无需手动操作。
 
+* **群晖兼容**: 生成群晖所需的三个独立证书文件（私钥、证书、中间证书），确保完全兼容 DSM 证书导入要求。
+
 ## 🚀 如何使用
 
 ### 1. 准备 DNS API 凭证
@@ -84,8 +86,11 @@ services:
       - AUTO_DEPLOY_TO_SYNOLOGY=true    # 设置为 true 启用自动部署
       - SYNO_USERNAME=your_dsm_admin_user # 群晖管理员用户名
       - SYNO_PASSWORD=your_dsm_admin_password # 群晖管理员密码
-      - SYNO_PORT=5001                  # 群晖 DSM 端口 (例如: 5001 for HTTPS)
-      - SYNO_PROTOCOL=https             # 群晖 DSM 访问协议 (http 或 https)
+      - SYNO_HOSTNAME=192.168.1.100     # 群晖 DSM IP 地址或域名
+      - SYNO_PORT=5001                  # 群晖 DSM 端口 (HTTP: 5000, HTTPS: 5001)
+      - SYNO_SCHEME=https               # 群晖 DSM 访问协议 (http 或 https)
+      - SYNO_CERTIFICATE=               # 证书描述名称 (空为默认证书)
+      - SYNO_CREATE=1                   # 允许创建新证书 (1: 允许, 0: 不允许)
 
       # --- (可选) 企业微信通知配置 ---
       - WECOM_CORP_ID=your_corp_id      # 企业微信企业 ID
@@ -119,8 +124,11 @@ services:
     "auto_deploy": true,
     "username": "your_dsm_admin_user",
     "password": "your_dsm_admin_password",
+    "hostname": "192.168.1.100",
     "port": 5001,
-    "protocol": "https"
+    "scheme": "https",
+    "certificate": "",
+    "create": "1"
   },
   "notifiers": {
     "wecom": {
@@ -153,6 +161,87 @@ docker-compose up -d
 ```
 
 容器首次启动后，会立即执行一次证书的检查与申请流程。此后，它将根据您在 `CRON_SCHEDULE` 环境变量中设置的定时任务表达式（默认为每天凌晨3点）自动执行证书续签。
+
+## 📋 证书文件输出
+
+工具会在输出目录（默认 `./output`）中生成群晖所需的证书文件：
+
+```
+output/
+├── privkey.pem    # 私钥文件（无密码保护）
+├── cert.pem       # 证书文件（仅包含域名证书）
+├── chain.pem      # 中间证书文件
+└── fullchain.pem  # 完整证书链（证书+中间证书，备用）
+```
+
+### 群晖 DSM 导入说明
+
+在群晖 DSM 中手动导入证书时：
+- **私钥**: 使用 `privkey.pem`
+- **证书**: 使用 `cert.pem` 
+- **中间证书**: 使用 `chain.pem`
+
+所有证书文件均为 X.509 PEM 格式，私钥支持 ECC 和 RSA 格式且无密码保护，完全符合群晖要求。
+
+## 🔧 群晖自动部署故障排除
+
+如果群晖自动部署功能不生效，请按以下步骤排查：
+
+### 1. 检查必要的配置参数
+确保以下环境变量或配置文件中都已正确设置：
+```bash
+AUTO_DEPLOY_TO_SYNOLOGY=true
+SYNO_USERNAME=your_admin_user      # 群晖管理员账户
+SYNO_PASSWORD=your_admin_password  # 群晖管理员密码
+SYNO_HOSTNAME=192.168.1.100       # 群晖 IP 地址
+SYNO_PORT=5001                    # DSM 端口
+SYNO_SCHEME=https                 # 访问协议
+SYNO_CREATE=1                     # 允许创建新证书
+```
+
+### 2. 网络连通性测试
+从容器内测试是否能访问群晖 DSM：
+```bash
+# 测试网络连通性
+curl -k https://192.168.1.100:5001
+
+# 检查 DSM 登录接口
+curl -k -X POST https://192.168.1.100:5001/webapi/auth.cgi \
+  -d "api=SYNO.API.Auth" \
+  -d "version=2" \
+  -d "method=login" \
+  -d "account=your_admin_user" \
+  -d "passwd=your_admin_password"
+```
+
+### 3. 常见问题解决
+
+**问题 1：认证失败**
+- 确认用户名和密码正确
+- 检查用户是否有管理员权限
+- 如果启用了 2FA，需要先在浏览器登录并勾选"记住此设备"
+
+**问题 2：证书部署失败**
+- 确保设置了 `SYNO_CREATE=1` 以允许创建新证书
+- 检查证书描述是否冲突（`SYNO_CERTIFICATE` 参数）
+- 验证网络连通性和端口是否正确
+
+**问题 3：部署成功但未生效**
+- 检查 DSM 中证书是否已导入
+- 确认服务是否已重启使用新证书
+- 手动重启相关服务（如 Web Station、VPN Server 等）
+
+### 4. 调试模式
+启用详细日志来诊断问题：
+```bash
+# 在环境变量中添加
+DEBUG=1
+```
+
+或手动执行部署命令查看详细输出：
+```bash
+/root/.acme.sh/acme.sh --deploy -d your.domain.com --deploy-hook synology_dsm --debug 2
+```
 
 ## 🛠️ 项目结构速览
 

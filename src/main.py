@@ -23,10 +23,13 @@ CERT_OUTPUT_PATH = config_mgr.get('general.cert_output_path', 'CERT_OUTPUT_PATH'
 
 # Synology 部署配置
 AUTO_DEPLOY_TO_SYNOLOGY = str(config_mgr.get('synology.auto_deploy', 'AUTO_DEPLOY_TO_SYNOLOGY', 'false')).lower() == 'true'
-SYNO_USERNAME = config_mgr.get('synology.username', 'SYNO_Username')
-SYNO_PASSWORD = config_mgr.get('synology.password', 'SYNO_Password')
-SYNO_PORT = config_mgr.get('synology.port', 'SYNO_Port')
-SYNO_PROTOCOL = config_mgr.get('synology.protocol', 'SYNO_Protocol')
+SYNO_USERNAME = config_mgr.get('synology.username', 'SYNO_USERNAME')
+SYNO_PASSWORD = config_mgr.get('synology.password', 'SYNO_PASSWORD')
+SYNO_PORT = config_mgr.get('synology.port', 'SYNO_PORT')
+SYNO_SCHEME = config_mgr.get('synology.scheme', 'SYNO_SCHEME')
+SYNO_HOSTNAME = config_mgr.get('synology.hostname', 'SYNO_HOSTNAME')
+SYNO_CERTIFICATE = config_mgr.get('synology.certificate', 'SYNO_CERTIFICATE', '')
+SYNO_CREATE = config_mgr.get('synology.create', 'SYNO_CREATE', '1')
 
 
 # 初始化通知管理器
@@ -49,10 +52,11 @@ def validate_config():
     if AUTO_DEPLOY_TO_SYNOLOGY:
         logging.info("检测到已启用 Synology 自动部署，将验证 DSM 相关配置。")
         required_vars.update({
-            'SYNO_Username': SYNO_USERNAME,
-            'SYNO_Password': SYNO_PASSWORD,
-            'SYNO_Port': SYNO_PORT,
-            'SYNO_Protocol': SYNO_PROTOCOL
+            'SYNO_USERNAME': SYNO_USERNAME,
+            'SYNO_PASSWORD': SYNO_PASSWORD,
+            'SYNO_HOSTNAME': SYNO_HOSTNAME,
+            'SYNO_PORT': SYNO_PORT,
+            'SYNO_SCHEME': SYNO_SCHEME
         })
 
     missing_vars = [k for k, v in required_vars.items() if not v]
@@ -112,7 +116,7 @@ def setup_acme_account():
 
 def issue_or_renew_cert():
     """执行证书申请或续签的核心逻辑"""
-    logging.info(f"开始为域名 *. {DOMAIN} 和 {DOMAIN} 申请/续签证书...")
+    logging.info(f"开始为域名 *.{DOMAIN} 和 {DOMAIN} 申请/续签证书...")
     acme_sh_path = '/root/.acme.sh/acme.sh'
     
     issue_command = [
@@ -121,22 +125,10 @@ def issue_or_renew_cert():
         '--keylength', 'ec-256', '--log'
     ]
 
-    # 【关键改动】
     # 动态准备需要传递给 acme.sh 的环境变量。
     # 这会自动抓取所有相关的 DNS 提供商的环境变量，例如 DP_Id, DP_Key, CF_Token 等。
     dns_api_prefixes = ('DP_', 'CF_', 'ALI_', 'GD_', 'HE_', 'CLOUDXNS_', 'GODADDY_')
     command_env = {k: v for k, v in os.environ.items() if k.startswith(dns_api_prefixes)}
-
-    if AUTO_DEPLOY_TO_SYNOLOGY:
-        logging.info("添加 synology_dsm 部署钩子到命令中。")
-        issue_command.extend(['--deploy-hook', 'synology_dsm'])
-        # 将群晖凭证添加到命令的环境中，供部署钩子使用
-        command_env.update({
-            'SYNO_Username': SYNO_USERNAME,
-            'SYNO_Password': SYNO_PASSWORD,
-            'SYNO_Port': str(SYNO_PORT),
-            'SYNO_Protocol': SYNO_PROTOCOL
-        })
 
     success, output = run_command(issue_command, env_vars=command_env)
     
@@ -145,16 +137,97 @@ def issue_or_renew_cert():
         logging.error(error_message)
         return False, output
     
-    success_message = "证书申请/续签命令执行成功。"
-    if AUTO_DEPLOY_TO_SYNOLOGY:
-        success_message += " 已触发部署到 Synology DSM 的流程。"
+    logging.info("证书申请/续签命令执行成功。")
+    return True, ""
+
+
+def deploy_to_synology():
+    """将证书部署到 Synology DSM"""
+    if not AUTO_DEPLOY_TO_SYNOLOGY:
+        return True, ""
+        
+    logging.info("开始将证书部署到 Synology DSM...")
+    acme_sh_path = '/root/.acme.sh/acme.sh'
     
-    logging.info(success_message)
+    deploy_command = [
+        acme_sh_path, '--deploy',
+        '-d', DOMAIN,
+        '--deploy-hook', 'synology_dsm'
+    ]
+    
+    # 准备群晖部署所需的环境变量
+    deploy_env = {
+        'SYNO_USERNAME': SYNO_USERNAME,
+        'SYNO_PASSWORD': SYNO_PASSWORD,
+        'SYNO_HOSTNAME': SYNO_HOSTNAME,
+        'SYNO_PORT': str(SYNO_PORT),
+        'SYNO_SCHEME': SYNO_SCHEME,
+        'SYNO_CERTIFICATE': SYNO_CERTIFICATE,
+        'SYNO_CREATE': str(SYNO_CREATE)
+    }
+    
+    logging.info(f"部署参数: 主机={SYNO_HOSTNAME}:{SYNO_PORT}, 协议={SYNO_SCHEME}, 创建新证书={SYNO_CREATE}")
+    
+    success, output = run_command(deploy_command, env_vars=deploy_env)
+    
+    if not success:
+        error_message = f"部署到 Synology DSM 失败。错误详情: \n{output}"
+        logging.error(error_message)
+        return False, error_message
+    
+    logging.info("证书已成功部署到 Synology DSM。")
+    return True, ""
+
+
+def validate_cert_files(output_path=None):
+    """验证生成的证书文件是否符合群晖要求"""
+    if output_path is None:
+        output_path = CERT_OUTPUT_PATH
+    
+    privkey_path = os.path.join(output_path, 'privkey.pem')
+    cert_path = os.path.join(output_path, 'cert.pem')
+    ca_path = os.path.join(output_path, 'chain.pem')
+    
+    errors = []
+    
+    # 检查文件是否存在
+    for file_path, file_type in [(privkey_path, '私钥'), (cert_path, '证书'), (ca_path, '中间证书')]:
+        if not os.path.exists(file_path):
+            errors.append(f"{file_type}文件不存在: {file_path}")
+            continue
+            
+        # 检查文件是否为空
+        if os.path.getsize(file_path) == 0:
+            errors.append(f"{file_type}文件为空: {file_path}")
+            continue
+            
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+                
+            # 检查 PEM 格式
+            if file_type == '私钥':
+                if not ('-----BEGIN PRIVATE KEY-----' in content or '-----BEGIN EC PRIVATE KEY-----' in content or '-----BEGIN RSA PRIVATE KEY-----' in content):
+                    errors.append(f"{file_type}文件格式不正确，应为 PEM 格式")
+                # 检查私钥是否有密码保护（简单检查）
+                if 'ENCRYPTED' in content.upper():
+                    errors.append(f"{file_type}文件不能有密码保护")
+            else:
+                if not ('-----BEGIN CERTIFICATE-----' in content and '-----END CERTIFICATE-----' in content):
+                    errors.append(f"{file_type}文件格式不正确，应为 X.509 PEM 格式")
+                    
+        except Exception as e:
+            errors.append(f"读取{file_type}文件时出错: {e}")
+    
+    if errors:
+        return False, "; ".join(errors)
+    
+    logging.info("证书文件验证通过，符合群晖要求")
     return True, ""
 
 
 def install_cert():
-    """将生成的证书文件拷贝到指定的输出目录"""
+    """将生成的证书文件拷贝到指定的输出目录，生成群晖所需的三个独立文件"""
     logging.info(f"开始将证书安装到输出目录: {CERT_OUTPUT_PATH}")
     acme_sh_path = '/root/.acme.sh/acme.sh'
     
@@ -165,11 +238,19 @@ def install_cert():
         logging.error(error_msg)
         return False, error_msg
 
+    # 群晖需要的三个文件路径
+    privkey_path = os.path.join(CERT_OUTPUT_PATH, 'privkey.pem')      # 私钥文件
+    cert_path = os.path.join(CERT_OUTPUT_PATH, 'cert.pem')           # 证书文件（不包含中间证书）
+    ca_path = os.path.join(CERT_OUTPUT_PATH, 'chain.pem')            # 中间证书文件
+    fullchain_path = os.path.join(CERT_OUTPUT_PATH, 'fullchain.pem') # 完整证书链（备用）
+
     install_command = [
         acme_sh_path, '--install-cert',
         '-d', DOMAIN,
-        '--key-file', os.path.join(CERT_OUTPUT_PATH, 'privkey.pem'),
-        '--fullchain-file', os.path.join(CERT_OUTPUT_PATH, 'fullchain.pem'),
+        '--key-file', privkey_path,        # 私钥文件
+        '--cert-file', cert_path,          # 证书文件（仅包含域名证书）
+        '--ca-file', ca_path,              # 中间证书文件
+        '--fullchain-file', fullchain_path, # 完整证书链（备用）
         '--reloadcmd', 'echo "Certificate installed."'
     ]
 
@@ -179,7 +260,16 @@ def install_cert():
         logging.error(error_message)
         return False, error_message
 
+    # 验证生成的文件是否符合群晖要求
+    validation_success, validation_error = validate_cert_files()
+    if not validation_success:
+        logging.warning(f"证书文件验证警告: {validation_error}")
+
     logging.info(f"证书已成功安装到 {CERT_OUTPUT_PATH}")
+    logging.info("群晖所需的证书文件:")
+    logging.info(f"  私钥文件: {privkey_path}")
+    logging.info(f"  证书文件: {cert_path}")
+    logging.info(f"  中间证书: {ca_path}")
     return True, ""
 
 
@@ -197,16 +287,35 @@ if __name__ == "__main__":
     issue_success, issue_error = issue_or_renew_cert()
 
     if issue_success:
+        # 部署到群晖（如果启用）
+        deploy_success, deploy_error = deploy_to_synology()
+        
+        # 安装证书文件到输出目录
         install_success, install_error = install_cert()
         
         if install_success:
-            success_details = f"证书已成功续签并保存到 {CERT_OUTPUT_PATH}。"
+            success_details = f"证书已成功续签并保存到 {CERT_OUTPUT_PATH}。\n"
+            success_details += "生成的群晖证书文件:\n"
+            success_details += "  • privkey.pem (私钥文件)\n"
+            success_details += "  • cert.pem (证书文件)\n"
+            success_details += "  • chain.pem (中间证书)\n"
+            success_details += "  • fullchain.pem (完整证书链，备用)"
+            
             if AUTO_DEPLOY_TO_SYNOLOGY:
-                success_details += "\n已尝试自动部署到 Synology DSM。"
+                if deploy_success:
+                    success_details += "\n\n✅ 已成功自动部署到 Synology DSM。"
+                else:
+                    success_details += f"\n\n❌ 自动部署到 Synology DSM 失败: {deploy_error}"
+                    
             logging.info("--- 证书自动化任务成功完成 ---")
             notification_mgr.dispatch("success", DOMAIN, details=success_details)
         else:
-            warning_details = f"证书续签/部署到 DSM 可能已成功，但保存证书到 {CERT_OUTPUT_PATH} 失败: {install_error}"
+            warning_details = f"证书续签成功，但保存证书到 {CERT_OUTPUT_PATH} 失败: {install_error}"
+            if AUTO_DEPLOY_TO_SYNOLOGY:
+                if deploy_success:
+                    warning_details += "\n✅ 已成功部署到 Synology DSM。"
+                else:
+                    warning_details += f"\n❌ 部署到 Synology DSM 失败: {deploy_error}"
             logging.warning(warning_details)
             notification_mgr.dispatch("success", DOMAIN, details=warning_details)
     else:

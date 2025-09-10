@@ -9,8 +9,11 @@
     "auto_deploy": true,
     "username": "your_dsm_admin_user",
     "password": "your_dsm_admin_password",
+    "hostname": "192.168.1.100",
     "port": 5001,
-    "protocol": "https"
+    "scheme": "https",
+    "certificate": "",
+    "create": "1"
   },
   "notifiers": {
     "wecom": {
