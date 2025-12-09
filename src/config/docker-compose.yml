@@ -5,24 +5,26 @@ services:
   cert-renewer:
     image: wapedkj/syno-cert-renewer:latest # 推荐使用最新的官方镜像
     container_name: syno-cert-renewer
-    restart: unless-stopped
+    restart: always # 推荐使用 always 策略以确保服务持续运行
     volumes:
-      # (必须) 持久化 acme.sh 的状态，避免重复申请证书。重要！
-      - ./acme.sh:/root/.acme.sh
-      # (必须) 挂载输出目录，用于存放生成的证书文件。
+      # (必须) 使用命名卷来持久化 acme.sh 的程序和数据，Docker将自动为您管理
+      - acme_sh_data:/root/.acme.sh
+      
+      # (必须) 挂载输出目录，用于在主机上直接获取生成的证书文件
       - ./output:/output 
-      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录。
+      
+      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录
       - ./temp:/temp
-      # (可选) 如果您希望使用文件进行配置，请取消此行的注释。
+
+      # (可选) 如果您希望使用文件进行配置，请取消此行的注释
       # - ./config:/config
     environment:
       # --- 基础配置 (必填项) ---
-      - DOMAIN=your.domain.com          # 您的主域名 (例如: example.com)
-      - DNS_API=dns_cf                  # 您的 DNS 提供商 API 类型 (例如: dns_cf for Cloudflare, dns_dp for DNSPod)
-      - ACME_EMAIL=youremail@example.com # 您的电子邮件地址，用于 Let's Encrypt 注册和通知
+      - DOMAIN=your.domain.com
+      - DNS_API=dns_dp
+      - ACME_EMAIL=youremail@example.com
 
-      # --- DNS API 凭证 (根据您的 DNS_API 类型填写) ---
-      # 例如：DNSPod:
+      # --- DNS API 凭证 (以 DNSPod 为例) ---
       - DP_Id=your_dnspod_id
       - DP_Key=your_dnspod_key
 
@@ -46,5 +48,6 @@ services:
       - CRON_SCHEDULE=0 3 * * * # Cron 表达式，默认每天凌晨3点执行
       - RENEW_DAYS_BEFORE_EXPIRY=30 # 证书过期前多少天开始尝试续签，默认30天
 
-    cap_add:
-      - NET_ADMIN
+# 在文件末尾声明命名卷
+volumes:
+  acme_sh_data:

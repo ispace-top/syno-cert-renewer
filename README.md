@@ -61,15 +61,18 @@ services:
   cert-renewer:
     image: wapedkj/syno-cert-renewer:latest # 推荐使用最新的官方镜像
     container_name: syno-cert-renewer
-    restart: unless-stopped
+    restart: always # 推荐使用 always 策略以确保服务持续运行
     volumes:
-      # (必须) 持久化 acme.sh 的状态，避免重复申请证书。重要！
-      - ./acme.sh:/root/.acme.sh
-      # (必须) 挂载输出目录，用于存放生成的证书文件。重要！
+      # (必须) 使用命名卷来持久化 acme.sh 的程序和数据，Docker将自动为您管理
+      - acme_sh_data:/root/.acme.sh
+      
+      # (必须) 挂载输出目录，用于在主机上直接获取生成的证书文件
       - ./output:/output 
-      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录。
+      
+      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录
       - ./temp:/temp
-      # (可选) 如果您希望使用文件进行配置，请取消此行的注释。
+
+      # (可选) 如果您希望使用文件进行配置，请取消此行的注释
       # - ./config:/config
     environment:
       # --- 基础配置 (必填项) ---
@@ -105,6 +108,10 @@ services:
       # --- (可选) 定时与检查配置 ---
       - CRON_SCHEDULE=0 3 * * * # Cron 表达式，默认每天凌晨3点执行。格式: 分 时 日 月 周
       - RENEW_DAYS_BEFORE_EXPIRY=30 # 证书过期前多少天开始尝试续签，默认30天
+
+# 在文件末尾声明命名卷
+volumes:
+  acme_sh_data:
 ```
 
 ### 4. 配置文件 `config.json` (可选，但推荐用于敏感信息)
@@ -152,10 +159,11 @@ services:
 在 `docker-compose.yml` 文件所在的目录执行以下命令：
 
 ```bash
-# 首先创建必要的本地目录，用于挂载数据
-mkdir -p ./acme.sh ./output ./temp ./config
+# 首先创建用于输出证书和缓存文件的本地目录
+mkdir -p ./output ./temp
 
-# 如果您选择使用 config.json，请先创建并编辑它
+# 如果您选择使用 config.json，请先创建 config 目录和文件
+# mkdir ./config
 # nano ./config/config.json 
 
 # 启动 Docker 容器 (首次启动会立即执行证书申请流程)
@@ -220,7 +228,7 @@ curl -k -X POST https://192.168.1.100:5001/webapi/auth.cgi \
 
 **问题 1：频繁重复申请证书 / 被 Let's Encrypt 限制**
 - **根本原因**: `acme.sh` 的状态没有被持久化。
-- **解决方案**: 检查您的 `docker-compose.yml` 文件，确保您已经添加了 `./acme.sh:/root/.acme.sh` 的卷挂载。这个挂载是**必须的**，它能让 `acme.sh` 记住它已经申请过的证书，从而避免不必要的重复申请。
+- **解决方案**: 检查您的 `docker-compose.yml` 文件，确保您已按照文档说明，正确使用了名为 `acme_sh_data` 的**命名卷 (Named Volume)** 来持久化 `/root/.acme.sh` 目录。这是确保 `acme.sh` 能够记住已申请证书的关键。
 
 **问题 2：认证失败**
 - 确认用户名和密码正确
