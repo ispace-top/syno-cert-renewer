@@ -63,9 +63,6 @@ services:
     container_name: syno-cert-renewer
     restart: always # 推荐使用 always 策略以确保服务持续运行
     volumes:
-      # (必须) 使用命名卷来持久化 acme.sh 的程序和数据，Docker将自动为您管理
-      - acme_sh_data:/root/.acme.sh
-      
       # (必须) 挂载输出目录，用于在主机上直接获取生成的证书文件
       - ./output:/output 
       
@@ -109,9 +106,6 @@ services:
       - CRON_SCHEDULE=0 3 * * * # Cron 表达式，默认每天凌晨3点执行。格式: 分 时 日 月 周
       - RENEW_DAYS_BEFORE_EXPIRY=30 # 证书过期前多少天开始尝试续签，默认30天
 
-# 在文件末尾声明命名卷
-volumes:
-  acme_sh_data:
 ```
 
 ### 4. 配置文件 `config.json` (可选，但推荐用于敏感信息)
@@ -227,8 +221,8 @@ curl -k -X POST https://192.168.1.100:5001/webapi/auth.cgi \
 ### 3. 常见问题解决
 
 **问题 1：频繁重复申请证书 / 被 Let's Encrypt 限制**
-- **根本原因**: `acme.sh` 的状态没有被持久化。
-- **解决方案**: 检查您的 `docker-compose.yml` 文件，确保您已按照文档说明，正确使用了名为 `acme_sh_data` 的**命名卷 (Named Volume)** 来持久化 `/root/.acme.sh` 目录。这是确保 `acme.sh` 能够记住已申请证书的关键。
+- **根本原因**: 每次容器重启都会导致 acme.sh 的状态丢失，使其每次都像初次运行一样尝试申请新证书。
+- **解决方案**: 这是预期行为，因为您已选择不持久化 `/root/.acme.sh` 目录。这意味着您每次运行都可能触发 Let's Encrypt 的速率限制。您需要等待速率限制解除后才能再次成功申请。
 
 **问题 2：认证失败**
 - 确认用户名和密码正确
