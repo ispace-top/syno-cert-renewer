@@ -38,9 +38,19 @@ class ConfigManager:
         :param env_var: 对应的环境变量名
         :param default: 如果都找不到，则返回此默认值
         """
-        value = default
+        # 1. 检查环境变量是否有更高优先级
+        if env_var:
+            env_value = os.environ.get(env_var)
+            if env_value is not None:
+                # 转换布尔值
+                if env_value.lower() in ('true', 'yes', '1'):
+                    return True
+                if env_value.lower() in ('false', 'no', '0'):
+                    return False
+                # 对于非布尔值，直接返回字符串
+                return env_value
         
-        # 1. 首先从文件配置中查找
+        # 2. 如果环境变量未设置，则从文件配置中查找
         temp_config = self.config
         try:
             keys = key_path.split('.')
@@ -48,20 +58,12 @@ class ConfigManager:
                 if isinstance(temp_config, dict):
                     temp_config = temp_config.get(key)
                 else:
-                    temp_config = None
-                    break
+                    return default
             if temp_config is not None:
-                value = temp_config
+                return temp_config
         except (KeyError, TypeError):
-            pass  # 未找到，将使用默认值或环境变量
+            pass
 
-        # 2. 检查环境变量是否有更高优先级
-        env_value = None
-        if env_var:
-            env_value = os.environ.get(env_var)
-
-        if env_value is not None:
-            value = env_value
-            
-        return value
+        # 3. 如果都找不到，则返回默认值
+        return default
 

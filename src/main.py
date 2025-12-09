@@ -22,7 +22,7 @@ ACME_EMAIL = config_mgr.get('general.acme_email', 'ACME_EMAIL')
 CERT_OUTPUT_PATH = config_mgr.get('general.cert_output_path', 'CERT_OUTPUT_PATH', '/output')
 
 # Synology 部署配置
-AUTO_DEPLOY_TO_SYNOLOGY = str(config_mgr.get('synology.auto_deploy', 'AUTO_DEPLOY_TO_SYNOLOGY', 'false')).lower() == 'true'
+AUTO_DEPLOY_TO_SYNOLOGY = config_mgr.get('synology.auto_deploy', 'AUTO_DEPLOY_TO_SYNOLOGY', False)
 SYNO_USERNAME = config_mgr.get('synology.username', 'SYNO_USERNAME')
 SYNO_PASSWORD = config_mgr.get('synology.password', 'SYNO_PASSWORD')
 SYNO_PORT = config_mgr.get('synology.port', 'SYNO_PORT')
