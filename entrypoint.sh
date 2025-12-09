@@ -3,6 +3,12 @@
 # 立即退出如果任何命令失败
 set -e
 
+# --- 保存环境变量 ---
+echo ">> Saving environment variables for cron job..."
+printenv | sed 's/^\(.*\)$/export \1/g' > /app/env.sh
+echo ">> Environment variables saved."
+echo " "
+
 # --- 首次运行 ---
 echo "================================================="
 echo "==      Synology Cert Renewer by Kerwin        =="
@@ -25,8 +31,9 @@ DEFAULT_CRON_SCHEDULE="0 3 * * *"
 CRON_JOB_SCHEDULE="${CRON_SCHEDULE:-$DEFAULT_CRON_SCHEDULE}"
 
 # 创建一个新的 crontab 文件
+# 在执行 python 脚本前，先加载保存的环境变量
 # 将标准输出和错误输出都重定向到 docker 日志
-echo "$CRON_JOB_SCHEDULE python /app/src/main.py >> /proc/1/fd/1 2>>/proc/1/fd/2" > /etc/crontabs/root
+echo "$CRON_JOB_SCHEDULE . /app/env.sh; python /app/src/main.py >> /proc/1/fd/1 2>>/proc/1/fd/2" > /etc/crontabs/root
 
 echo ">> 定时任务已设置为: '$CRON_JOB_SCHEDULE'"
 echo " "
