@@ -3,7 +3,8 @@
     "domain": "your.domain.com",
     "dns_api": "dns_cf",
     "acme_email": "youremail@example.com",
-    "cert_output_path": "/output"
+    "cert_output_path": "/output",
+    "renew_days_before_expiry": 30
   },
   "synology": {
     "auto_deploy": true,

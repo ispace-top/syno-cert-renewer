@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import subprocess
+from datetime import datetime, timedelta
 from notifiers.notification_manager import NotificationManager
 from config_manager import ConfigManager
 
@@ -20,6 +21,7 @@ DOMAIN = config_mgr.get('general.domain', 'DOMAIN')
 DNS_API = config_mgr.get('general.dns_api', 'DNS_API')
 ACME_EMAIL = config_mgr.get('general.acme_email', 'ACME_EMAIL')
 CERT_OUTPUT_PATH = config_mgr.get('general.cert_output_path', 'CERT_OUTPUT_PATH', '/output')
+RENEW_DAYS_BEFORE_EXPIRY = int(config_mgr.get('general.renew_days_before_expiry', 'RENEW_DAYS_BEFORE_EXPIRY', 30))
 
 # Synology 部署配置
 AUTO_DEPLOY_TO_SYNOLOGY = config_mgr.get('synology.auto_deploy', 'AUTO_DEPLOY_TO_SYNOLOGY', False)
@@ -36,10 +38,70 @@ SYNO_CREATE = config_mgr.get('synology.create', 'SYNO_CREATE', '1')
 notification_mgr = NotificationManager()
 
 
+def needs_renewal(domain: str, days_before_expiry: int) -> bool:
+    """
+    通过 OpenSSL 检查域名的 SSL 证书是否需要续签。
+
+    :param domain: 要检查的域名。
+    :param days_before_expiry: 在证书过期前多少天应判断为需要续签。
+    :return: 如果需要续签，返回 True，否则返回 False。
+    """
+    logging.info(f"开始检查域名 '{domain}' 的证书状态...")
+
+    try:
+        # 使用 openssl s_client 获取证书信息
+        command = f"echo | openssl s_client -connect {domain}:443 -servername {domain} 2>/dev/null | openssl x509 -noout -enddate"
+
+        process = subprocess.run(
+            command,
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15  # 15秒超时
+        )
+
+        output = process.stdout.strip()
+
+        if not output.startswith('notAfter='):
+            logging.warning(f"无法从命令输出中解析有效期: {output}")
+            logging.info("将默认需要续签以确保安全。")
+            return True
+
+        # 解析日期
+        expiry_date_str = output.split('=', 1)[1]
+        # OpenSSL 日期格式: "Month Day HH:MM:SS YYYY GMT"
+        expiry_date = datetime.strptime(expiry_date_str, '%b %d %H:%M:%S %Y %Z')
+
+        time_left = expiry_date - datetime.utcnow()
+
+        logging.info(f"域名 '{domain}' 的证书将于 {time_left.days} 天后过期 (在 {expiry_date.strftime('%Y-%m-%d')} 到期)。")
+
+        if time_left < timedelta(days=days_before_expiry):
+            logging.info(f"证书剩余时间小于阈值 {days_before_expiry} 天，需要续签。")
+            return True
+        else:
+            logging.info(f"证书有效期尚足，无需续签。")
+            return False
+
+    except subprocess.TimeoutExpired:
+        logging.warning(f"检查证书时连接到 '{domain}:443' 超时。")
+        logging.info("将默认需要续签以确保可用性。")
+        return True
+    except subprocess.CalledProcessError as e:
+        logging.warning(f"使用 OpenSSL 检查证书失败: {e.stderr}")
+        logging.info("可能是域名不存在、未部署证书或网络问题。将默认需要续签。")
+        return True
+    except Exception as e:
+        logging.error(f"检查证书时发生未知错误: {e}")
+        logging.info("将默认需要续签以确保安全。")
+        return True
+
+
 def validate_config():
     """检查核心的配置是否都已设置"""
     logging.info("开始验证配置...")
-    
+
     required_vars = {
         'DOMAIN': DOMAIN,
         'DNS_API': DNS_API,
@@ -65,7 +127,7 @@ def validate_config():
         logging.error(error_msg)
         notification_mgr.dispatch("failure", DOMAIN, details=error_msg)
         sys.exit(1)
-        
+
     logging.info("配置验证通过。")
 
 
@@ -74,7 +136,7 @@ def run_command(command, env_vars=None):
     env = os.environ.copy()
     if env_vars:
         env.update(env_vars)
-        
+
     try:
         process = subprocess.run(
             command,
@@ -99,7 +161,7 @@ def setup_acme_account():
     """注册 acme.sh 账户并设置默认 CA"""
     logging.info("正在设置 acme.sh 账户...")
     acme_sh_path = '/root/.acme.sh/acme.sh'
-    
+
     register_cmd = [acme_sh_path, '--register-account', '-m', ACME_EMAIL]
     success, _ = run_command(register_cmd)
     if not success:
@@ -110,7 +172,7 @@ def setup_acme_account():
     if not success:
         logging.error("设置默认 CA 失败。")
         return False
-        
+
     return True
 
 
@@ -118,7 +180,7 @@ def issue_or_renew_cert():
     """执行证书申请或续签的核心逻辑"""
     logging.info(f"开始为域名 *.{DOMAIN} 和 {DOMAIN} 申请/续签证书...")
     acme_sh_path = '/root/.acme.sh/acme.sh'
-    
+
     issue_command = [
         acme_sh_path, '--issue', '--dns', DNS_API,
         '-d', DOMAIN, '-d', f'*.{DOMAIN}',
@@ -131,12 +193,12 @@ def issue_or_renew_cert():
     command_env = {k: v for k, v in os.environ.items() if k.startswith(dns_api_prefixes)}
 
     success, output = run_command(issue_command, env_vars=command_env)
-    
+
     if not success:
         error_message = f"证书申请/续签失败。错误详情: \n{output}"
         logging.error(error_message)
         return False, output
-    
+
     logging.info("证书申请/续签命令执行成功。")
     return True, ""
 
@@ -145,16 +207,16 @@ def deploy_to_synology():
     """将证书部署到 Synology DSM"""
     if not AUTO_DEPLOY_TO_SYNOLOGY:
         return True, ""
-        
+
     logging.info("开始将证书部署到 Synology DSM...")
     acme_sh_path = '/root/.acme.sh/acme.sh'
-    
+
     deploy_command = [
         acme_sh_path, '--deploy',
         '-d', DOMAIN,
         '--deploy-hook', 'synology_dsm'
     ]
-    
+
     # 准备群晖部署所需的环境变量
     deploy_env = {
         'SYNO_USERNAME': SYNO_USERNAME,
@@ -165,16 +227,16 @@ def deploy_to_synology():
         'SYNO_CERTIFICATE': SYNO_CERTIFICATE,
         'SYNO_CREATE': str(SYNO_CREATE)
     }
-    
+
     logging.info(f"部署参数: 主机={SYNO_HOSTNAME}:{SYNO_PORT}, 协议={SYNO_SCHEME}, 创建新证书={SYNO_CREATE}")
-    
+
     success, output = run_command(deploy_command, env_vars=deploy_env)
-    
+
     if not success:
         error_message = f"部署到 Synology DSM 失败。错误详情: \n{output}"
         logging.error(error_message)
         return False, error_message
-    
+
     logging.info("证书已成功部署到 Synology DSM。")
     return True, ""
 
@@ -183,28 +245,28 @@ def validate_cert_files(output_path=None):
     """验证生成的证书文件是否符合群晖要求"""
     if output_path is None:
         output_path = CERT_OUTPUT_PATH
-    
+
     privkey_path = os.path.join(output_path, 'privkey.pem')
     cert_path = os.path.join(output_path, 'cert.pem')
     ca_path = os.path.join(output_path, 'chain.pem')
-    
+
     errors = []
-    
+
     # 检查文件是否存在
     for file_path, file_type in [(privkey_path, '私钥'), (cert_path, '证书'), (ca_path, '中间证书')]:
         if not os.path.exists(file_path):
             errors.append(f"{file_type}文件不存在: {file_path}")
             continue
-            
+
         # 检查文件是否为空
         if os.path.getsize(file_path) == 0:
             errors.append(f"{file_type}文件为空: {file_path}")
             continue
-            
+
         try:
             with open(file_path, 'r') as f:
                 content = f.read()
-                
+
             # 检查 PEM 格式
             if file_type == '私钥':
                 if not ('-----BEGIN PRIVATE KEY-----' in content or '-----BEGIN EC PRIVATE KEY-----' in content or '-----BEGIN RSA PRIVATE KEY-----' in content):
@@ -215,13 +277,13 @@ def validate_cert_files(output_path=None):
             else:
                 if not ('-----BEGIN CERTIFICATE-----' in content and '-----END CERTIFICATE-----' in content):
                     errors.append(f"{file_type}文件格式不正确，应为 X.509 PEM 格式")
-                    
+
         except Exception as e:
             errors.append(f"读取{file_type}文件时出错: {e}")
-    
+
     if errors:
         return False, "; ".join(errors)
-    
+
     logging.info("证书文件验证通过，符合群晖要求")
     return True, ""
 
@@ -230,7 +292,7 @@ def install_cert():
     """将生成的证书文件拷贝到指定的输出目录，生成群晖所需的三个独立文件"""
     logging.info(f"开始将证书安装到输出目录: {CERT_OUTPUT_PATH}")
     acme_sh_path = '/root/.acme.sh/acme.sh'
-    
+
     try:
         os.makedirs(CERT_OUTPUT_PATH, exist_ok=True)
     except OSError as e:
@@ -275,9 +337,23 @@ def install_cert():
 
 if __name__ == "__main__":
     logging.info("--- Synology 证书续签工具启动 ---")
-    
+
     validate_config()
-    
+
+    # 检查证书是否需要续签
+    if not needs_renewal(DOMAIN, RENEW_DAYS_BEFORE_EXPIRY):
+        logging.info("--- 证书检查完成，无需操作 ---")
+        # 直接发送一个“无需操作”的成功通知
+        notification_mgr.dispatch(
+            "success",
+            DOMAIN,
+            details=f"域名 {DOMAIN} 的证书有效期尚足，本次无需执行续签。"
+        )
+        sys.exit(0)
+
+    # -- 如果需要续签，则执行以下流程 --
+    logging.info("证书需要续签，开始执行 acme.sh 流程...")
+
     if not setup_acme_account():
         error_msg = "acme.sh 账户设置失败，程序终止。"
         logging.error(error_msg)
@@ -289,10 +365,10 @@ if __name__ == "__main__":
     if issue_success:
         # 部署到群晖（如果启用）
         deploy_success, deploy_error = deploy_to_synology()
-        
+
         # 安装证书文件到输出目录
         install_success, install_error = install_cert()
-        
+
         if install_success:
             success_details = f"证书已成功续签并保存到 {CERT_OUTPUT_PATH}。\n"
             success_details += "生成的群晖证书文件:\n"
@@ -300,13 +376,13 @@ if __name__ == "__main__":
             success_details += "  • cert.pem (证书文件)\n"
             success_details += "  • chain.pem (中间证书)\n"
             success_details += "  • fullchain.pem (完整证书链，备用)"
-            
+
             if AUTO_DEPLOY_TO_SYNOLOGY:
                 if deploy_success:
                     success_details += "\n\n✅ 已成功自动部署到 Synology DSM。"
                 else:
                     success_details += f"\n\n❌ 自动部署到 Synology DSM 失败: {deploy_error}"
-                    
+
             logging.info("--- 证书自动化任务成功完成 ---")
             notification_mgr.dispatch("success", DOMAIN, details=success_details)
         else:
