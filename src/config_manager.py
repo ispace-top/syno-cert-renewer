@@ -38,9 +38,12 @@ class ConfigManager:
         :param env_var: 对应的环境变量名
         :param default: 如果都找不到，则返回此默认值
         """
-        # 1. 检查环境变量是否有更高优先级
+        # 1. 检查环境变量(不区分大小写)
         if env_var:
-            env_value = os.environ.get(env_var)
+            # 创建一个不区分大小写的环境变量查找
+            env_vars_upper = {k.upper(): v for k, v in os.environ.items()}
+            env_value = env_vars_upper.get(env_var.upper())
+
             if env_value is not None:
                 # 转换布尔值
                 if env_value.lower() in ('true', 'yes', '1'):
@@ -49,7 +52,7 @@ class ConfigManager:
                     return False
                 # 对于非布尔值，直接返回字符串
                 return env_value
-        
+
         # 2. 如果环境变量未设置，则从文件配置中查找
         temp_config = self.config
         try:
