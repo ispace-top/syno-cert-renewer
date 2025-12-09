@@ -1,47 +1,50 @@
-## 示例docker-compose.yml文件，根据实际情况修改。
+## 示例docker-compose.yml文件，请根据您的实际情况修改。
 version: '3.8'
 
 services:
   cert-renewer:
-    image: syno-cert-renewer:latest 
+    image: wapedkj/syno-cert-renewer:latest # 推荐使用最新的官方镜像
     container_name: syno-cert-renewer
     restart: unless-stopped
     volumes:
-      # 挂载输出目录，用于存放生成的证书文件
+      # (必须) 持久化 acme.sh 的状态，避免重复申请证书。重要！
+      - ./acme.sh:/root/.acme.sh
+      # (必须) 挂载输出目录，用于存放生成的证书文件。
       - ./output:/output 
-      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录
+      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录。
       - ./temp:/temp
-      # (可选) 挂载配置文件目录
-      - ./config:/config
+      # (可选) 如果您希望使用文件进行配置，请取消此行的注释。
+      # - ./config:/config
     environment:
-      # --- 基础配置 ---
-      - DOMAIN=
-      - DNS_API=           # 您的 DNS 提供商 API (例如: dns_dp DNSPod)
-      - ACME_EMAIL=
-      - DP_Id=             # API Token
-      - DP_Key=            # 某些提供商需要， Account ID
+      # --- 基础配置 (必填项) ---
+      - DOMAIN=your.domain.com          # 您的主域名 (例如: example.com)
+      - DNS_API=dns_cf                  # 您的 DNS 提供商 API 类型 (例如: dns_cf for Cloudflare, dns_dp for DNSPod)
+      - ACME_EMAIL=youremail@example.com # 您的电子邮件地址，用于 Let's Encrypt 注册和通知
+
+      # --- DNS API 凭证 (根据您的 DNS_API 类型填写) ---
+      # 例如：DNSPod:
+      - DP_Id=your_dnspod_id
+      - DP_Key=your_dnspod_key
 
       # --- (可选) 自动部署到 Synology DSM (密码等敏感信息建议写入 config.json) ---
       - AUTO_DEPLOY_TO_SYNOLOGY=true
-      - SYNO_Username=         # <-- 已修正: USERNAME -> Username
-      - SYNO_Password=         # <-- 已修正: PASSWORD -> Password
-      - SYNO_Port=             # <-- 群晖服务端口
-      - SYNO_Protocol=
-    
-      - SYNO_Scheme=""         # <-- 协议：http or https
-      - SYNO_Hostname=""       # <-- 群晖地址
-      - SYNO_Create=
-      - SYNO_Certificate=""
+      - SYNO_USERNAME=your_dsm_admin_user
+      - SYNO_PASSWORD=your_dsm_admin_password
+      - SYNO_HOSTNAME=192.168.1.100
+      - SYNO_PORT=5001
+      - SYNO_SCHEME=https
+      - SYNO_CERTIFICATE=
+      - SYNO_CREATE=1
 
       # --- (可选) 企业微信通知配置 ---
       - WECOM_CORP_ID=
       - WECOM_CORP_SECRET=
       - WECOM_AGENT_ID=
-      - WECOM_MEDIA_ID=
-      - WECOM_TOUSER=  # 接收者, @all 表示所有
+      - WECOM_TOUSER=@all
       
-      # --- (可选) 定时任务配置 ---
-      - CRON_SCHEDULE=0 3 * * * # 默认每天凌晨3点执行
+      # --- (可选) 定时与检查配置 ---
+      - CRON_SCHEDULE=0 3 * * * # Cron 表达式，默认每天凌晨3点执行
+      - RENEW_DAYS_BEFORE_EXPIRY=30 # 证书过期前多少天开始尝试续签，默认30天
 
     cap_add:
       - NET_ADMIN

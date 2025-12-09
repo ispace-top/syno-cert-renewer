@@ -12,6 +12,8 @@
 
 * **全自动化**: 一次设置，通过 Cron 定时任务实现证书的自动续签，省心省力。
 
+* **智能检查**: 每次运行前，首先通过 `openssl` 检查域名现有证书的有效期。仅当证书即将到期时（可配置天数）才执行续签流程，最大限度避免了因频繁申请而导致的 Let's Encrypt 速率限制。
+
 * **泛域名支持**: 利用 DNS Challenge 模式，轻松申请 `your.domain` 和 `*.your.domain` 的泛域名证书。
 
 * **Docker 部署**: 提供干净、隔离、高度可移植的运行环境，部署和迁移极为简便。
@@ -57,16 +59,18 @@ version: '3.8'
 
 services:
   cert-renewer:
-    image: ispace/syno-cert-renewer:latest # 推荐使用最新的官方镜像
+    image: wapedkj/syno-cert-renewer:latest # 推荐使用最新的官方镜像
     container_name: syno-cert-renewer
     restart: unless-stopped
     volumes:
-      # 挂载输出目录，用于存放生成的证书文件。重要！
+      # (必须) 持久化 acme.sh 的状态，避免重复申请证书。重要！
+      - ./acme.sh:/root/.acme.sh
+      # (必须) 挂载输出目录，用于存放生成的证书文件。重要！
       - ./output:/output 
-      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录。重要！
+      # (必须) 挂载一个用于缓存企业微信 access_token 的临时目录。
       - ./temp:/temp
-      # (可选) 挂载配置文件目录。如果使用 config.json，则需要此项。
-      - ./config:/config
+      # (可选) 如果您希望使用文件进行配置，请取消此行的注释。
+      # - ./config:/config
     environment:
       # --- 基础配置 (必填项) ---
       - DOMAIN=your.domain.com          # 您的主域名 (例如: example.com)
@@ -98,12 +102,9 @@ services:
       - WECOM_AGENT_ID=your_agent_id    # 企业微信应用 AgentId
       - WECOM_TOUSER=@all               # 消息接收者 (可为成员ID, 部门ID, 或 @all)
       
-      # --- (可选) 定时任务配置 ---
+      # --- (可选) 定时与检查配置 ---
       - CRON_SCHEDULE=0 3 * * * # Cron 表达式，默认每天凌晨3点执行。格式: 分 时 日 月 周
-
-    # 容器需要网络管理员权限才能执行 DNS Challenge
-    cap_add:
-      - NET_ADMIN
+      - RENEW_DAYS_BEFORE_EXPIRY=30 # 证书过期前多少天开始尝试续签，默认30天
 ```
 
 ### 4. 配置文件 `config.json` (可选，但推荐用于敏感信息)
@@ -118,7 +119,8 @@ services:
     "domain": "your.domain.com",
     "dns_api": "dns_cf",
     "acme_email": "youremail@example.com",
-    "cert_output_path": "/output"
+    "cert_output_path": "/output",
+    "renew_days_before_expiry": 30
   },
   "synology": {
     "auto_deploy": true,
@@ -151,7 +153,7 @@ services:
 
 ```bash
 # 首先创建必要的本地目录，用于挂载数据
-mkdir -p ./output ./temp ./config
+mkdir -p ./acme.sh ./output ./temp ./config
 
 # 如果您选择使用 config.json，请先创建并编辑它
 # nano ./config/config.json 
@@ -216,17 +218,21 @@ curl -k -X POST https://192.168.1.100:5001/webapi/auth.cgi \
 
 ### 3. 常见问题解决
 
-**问题 1：认证失败**
+**问题 1：频繁重复申请证书 / 被 Let's Encrypt 限制**
+- **根本原因**: `acme.sh` 的状态没有被持久化。
+- **解决方案**: 检查您的 `docker-compose.yml` 文件，确保您已经添加了 `./acme.sh:/root/.acme.sh` 的卷挂载。这个挂载是**必须的**，它能让 `acme.sh` 记住它已经申请过的证书，从而避免不必要的重复申请。
+
+**问题 2：认证失败**
 - 确认用户名和密码正确
 - 检查用户是否有管理员权限
 - 如果启用了 2FA，需要先在浏览器登录并勾选"记住此设备"
 
-**问题 2：证书部署失败**
+**问题 3：证书部署失败**
 - 确保设置了 `SYNO_CREATE=1` 以允许创建新证书
 - 检查证书描述是否冲突（`SYNO_CERTIFICATE` 参数）
 - 验证网络连通性和端口是否正确
 
-**问题 3：部署成功但未生效**
+**问题 4：部署成功但未生效**
 - 检查 DSM 中证书是否已导入
 - 确认服务是否已重启使用新证书
 - 手动重启相关服务（如 Web Station、VPN Server 等）
