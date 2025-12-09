@@ -321,5 +321,4 @@ if __name__ == "__main__":
     else:
         logging.error("--- 证书自动化任务失败 ---")
         notification_mgr.dispatch("failure", DOMAIN, details=issue_error)
-        sys.exit(1)
 
