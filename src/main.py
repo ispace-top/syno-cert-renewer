@@ -2,6 +2,8 @@ import os
 import sys
 import logging
 import subprocess
+import time
+import json
 from datetime import datetime, timedelta
 from notifiers.notification_manager import NotificationManager
 from config_manager import ConfigManager
@@ -17,34 +19,38 @@ config_mgr = ConfigManager()
 # --- 从配置和环境变量加载设置 (环境变量优先) ---
 
 # 基础配置
-DOMAIN = config_mgr.get('general.domain', 'DOMAIN')
-DNS_API = config_mgr.get('general.dns_api', 'DNS_API')
-ACME_EMAIL = config_mgr.get('general.acme_email', 'ACME_EMAIL')
-CERT_OUTPUT_PATH = config_mgr.get('general.cert_output_path', 'CERT_OUTPUT_PATH', '/output')
-RENEW_DAYS_BEFORE_EXPIRY = int(config_mgr.get('general.renew_days_before_expiry', 'RENEW_DAYS_BEFORE_EXPIRY', 30))
+DOMAIN = str(config_mgr.get('general.domain', 'DOMAIN') or '')
+DNS_API = str(config_mgr.get('general.dns_api', 'DNS_API') or '')
+ACME_EMAIL = str(config_mgr.get('general.acme_email', 'ACME_EMAIL') or '')
+CERT_OUTPUT_PATH = str(config_mgr.get('general.cert_output_path', 'CERT_OUTPUT_PATH', '/output') or '/output')
+RENEW_DAYS_BEFORE_EXPIRY = int(str(config_mgr.get('general.renew_days_before_expiry', 'RENEW_DAYS_BEFORE_EXPIRY', 30) or '30'))
 
 # Synology 部署配置
 AUTO_DEPLOY_TO_SYNOLOGY = config_mgr.get('synology.auto_deploy', 'AUTO_DEPLOY_TO_SYNOLOGY', False)
-SYNO_USERNAME = config_mgr.get('synology.username', 'SYNO_USERNAME')
-SYNO_PASSWORD = config_mgr.get('synology.password', 'SYNO_PASSWORD')
-SYNO_PORT = config_mgr.get('synology.port', 'SYNO_PORT')
-SYNO_SCHEME = config_mgr.get('synology.scheme', 'SYNO_SCHEME')
-SYNO_HOSTNAME = config_mgr.get('synology.hostname', 'SYNO_HOSTNAME')
-SYNO_CERTIFICATE = config_mgr.get('synology.certificate', 'SYNO_CERTIFICATE', '')
-SYNO_CREATE = config_mgr.get('synology.create', 'SYNO_CREATE', '1')
+SYNO_USERNAME = str(config_mgr.get('synology.username', 'SYNO_USERNAME') or '')
+SYNO_PASSWORD = str(config_mgr.get('synology.password', 'SYNO_PASSWORD') or '')
+SYNO_PORT = str(config_mgr.get('synology.port', 'SYNO_PORT') or '')
+SYNO_SCHEME = str(config_mgr.get('synology.scheme', 'SYNO_SCHEME') or '')
+SYNO_HOSTNAME = str(config_mgr.get('synology.hostname', 'SYNO_HOSTNAME') or '')
+SYNO_CERTIFICATE = str(config_mgr.get('synology.certificate', 'SYNO_CERTIFICATE', '') or '')
+SYNO_CREATE = str(config_mgr.get('synology.create', 'SYNO_CREATE', '1') or '1')
+
+# 状态文件路径
+STATE_FILE_PATH = '/app/.last_run'
+SCHEDULER_STATE_FILE_PATH = '/app/.scheduler_state'
 
 
 # 初始化通知管理器
 notification_mgr = NotificationManager()
 
 
-def needs_renewal(domain: str, days_before_expiry: int) -> bool:
+def needs_renewal(domain: str, days_before_expiry: int) -> tuple:
     """
     通过 OpenSSL 检查域名的 SSL 证书是否需要续签。
 
     :param domain: 要检查的域名。
     :param days_before_expiry: 在证书过期前多少天应判断为需要续签。
-    :return: 如果需要续签，返回 True，否则返回 False。
+    :return: (bool, datetime) 如果需要续签，返回 True 和证书过期时间，否则返回 False 和证书过期时间。
     """
     logging.info(f"开始检查域名 '{domain}' 的证书状态...")
 
@@ -66,7 +72,7 @@ def needs_renewal(domain: str, days_before_expiry: int) -> bool:
         if not output.startswith('notAfter='):
             logging.warning(f"无法从命令输出中解析有效期: {output}")
             logging.info("将默认需要续签以确保安全。")
-            return True
+            return True, None
 
         # 解析日期
         expiry_date_str = output.split('=', 1)[1]
@@ -79,23 +85,23 @@ def needs_renewal(domain: str, days_before_expiry: int) -> bool:
 
         if time_left < timedelta(days=days_before_expiry):
             logging.info(f"证书剩余时间小于阈值 {days_before_expiry} 天，需要续签。")
-            return True
+            return True, expiry_date
         else:
             logging.info(f"证书有效期尚足，无需续签。")
-            return False
+            return False, expiry_date
 
     except subprocess.TimeoutExpired:
         logging.warning(f"检查证书时连接到 '{domain}:443' 超时。")
         logging.info("将默认需要续签以确保可用性。")
-        return True
+        return True, None
     except subprocess.CalledProcessError as e:
         logging.warning(f"使用 OpenSSL 检查证书失败: {e.stderr}")
         logging.info("可能是域名不存在、未部署证书或网络问题。将默认需要续签。")
-        return True
+        return True, None
     except Exception as e:
         logging.error(f"检查证书时发生未知错误: {e}")
         logging.info("将默认需要续签以确保安全。")
-        return True
+        return True, None
 
 
 def validate_config():
@@ -335,20 +341,68 @@ def install_cert():
     return True, ""
 
 
+def save_scheduler_state(next_run_time):
+    """保存调度器状态（下次运行时间）"""
+    try:
+        with open(SCHEDULER_STATE_FILE_PATH, 'w') as f:
+            json.dump({
+                'next_run_time': next_run_time.isoformat()
+            }, f)
+    except Exception as e:
+        logging.warning(f"无法保存调度器状态: {e}")
+
+
 if __name__ == "__main__":
     logging.info("--- Synology 证书续签工具启动 ---")
 
     validate_config()
 
+    # 检查是否是首次运行
+    first_run = not os.path.exists(STATE_FILE_PATH)
+    
+    if first_run:
+        logging.info("检测到首次运行，将执行证书检查和更新...")
+        notification_mgr.dispatch(
+            "info",
+            DOMAIN,
+            details="容器首次启动，开始执行证书检查与申请..."
+        )
+    
     # 检查证书是否需要续签
-    if not needs_renewal(DOMAIN, RENEW_DAYS_BEFORE_EXPIRY):
+    need_renew, expiry_date = needs_renewal(DOMAIN, RENEW_DAYS_BEFORE_EXPIRY)
+    
+    if not need_renew:
         logging.info("--- 证书检查完成，无需操作 ---")
-        # 直接发送一个“无需操作”的成功通知
+        # 直接发送一个"无需操作"的成功通知
         notification_mgr.dispatch(
             "success",
             DOMAIN,
             details=f"域名 {DOMAIN} 的证书有效期尚足，本次无需执行续签。"
         )
+        
+        # 更新状态文件
+        with open(STATE_FILE_PATH, 'w') as f:
+            json.dump({
+                'last_run': datetime.now().isoformat(),
+                'expiry_date': expiry_date.isoformat() if expiry_date else None,
+                'need_renew': False
+            }, f)
+        
+        # 计算下次运行时间
+        next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+        if expiry_date:
+            # 根据证书过期时间计算下次运行时间，确保证书过期前 renew
+            suggested_next_run = expiry_date - timedelta(days=RENEW_DAYS_BEFORE_EXPIRY - 1)
+            next_run_time = min(next_run_time, suggested_next_run)
+        
+        notification_mgr.dispatch(
+            "info",
+            DOMAIN,
+            details=f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
+        # 保存调度器状态供主循环使用
+        save_scheduler_state(next_run_time)
         sys.exit(0)
 
     # -- 如果需要续签，则执行以下流程 --
@@ -358,6 +412,17 @@ if __name__ == "__main__":
         error_msg = "acme.sh 账户设置失败，程序终止。"
         logging.error(error_msg)
         notification_mgr.dispatch("failure", DOMAIN, details=error_msg)
+        
+        # 对于不可恢复的错误，按常规间隔再次运行
+        next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+        notification_mgr.dispatch(
+            "info",
+            DOMAIN,
+            details=f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
+        # 保存调度器状态供主循环使用
+        save_scheduler_state(next_run_time)
         sys.exit(1)
 
     issue_success, issue_error = issue_or_renew_cert()
@@ -394,6 +459,32 @@ if __name__ == "__main__":
                     warning_details += f"\n❌ 部署到 Synology DSM 失败: {deploy_error}"
             logging.warning(warning_details)
             notification_mgr.dispatch("success", DOMAIN, details=warning_details)
+        
+        # 更新状态文件
+        with open(STATE_FILE_PATH, 'w') as f:
+            json.dump({
+                'last_run': datetime.now().isoformat(),
+                'expiry_date': expiry_date.isoformat() if expiry_date else None,
+                'need_renew': False
+            }, f)
+        
+        # 计算下次运行时间
+        next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+        # 获取新证书的过期时间
+        _, new_expiry_date = needs_renewal(DOMAIN, RENEW_DAYS_BEFORE_EXPIRY)
+        if new_expiry_date:
+            # 根据新证书过期时间计算下次运行时间
+            suggested_next_run = new_expiry_date - timedelta(days=RENEW_DAYS_BEFORE_EXPIRY - 1)
+            next_run_time = min(next_run_time, suggested_next_run)
+        
+        notification_mgr.dispatch(
+            "info",
+            DOMAIN,
+            details=f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
+        # 保存调度器状态供主循环使用
+        save_scheduler_state(next_run_time)
     else:
         logging.error("--- 证书自动化任务失败 ---")
         
@@ -410,7 +501,25 @@ if __name__ == "__main__":
                 f"**原始错误详情**:\n{issue_error}"
             )
             notification_mgr.dispatch("failure", DOMAIN, details=user_friendly_error)
+            
+            # 对于速率限制等可恢复错误，设置较短的重试时间
+            next_run_time = datetime.now() + timedelta(hours=1)  # 1小时后重试
+            notification_mgr.dispatch(
+                "info",
+                DOMAIN,
+                details=f"由于遇到可恢复错误，将在 {next_run_time.strftime('%Y-%m-%d %H:%M:%S')} 重试..."
+            )
         else:
             # 对于所有其他错误，发送原始错误
             notification_mgr.dispatch("failure", DOMAIN, details=issue_error)
-
+            
+            # 对于其他错误，按常规间隔再次运行
+            next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+            notification_mgr.dispatch(
+                "info",
+                DOMAIN,
+                details=f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        
+        # 保存调度器状态供主循环使用
+        save_scheduler_state(next_run_time)

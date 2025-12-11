@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from typing import Optional, Any
 
 class ConfigManager:
     _instance = None
@@ -29,7 +30,7 @@ class ConfigManager:
 
         self._initialized = True
 
-    def get(self, key_path: str, env_var: str = None, default=None):
+    def get(self, key_path: str, env_var: Optional[str] = None, default: Any = None) -> Any:
         """
         根据点分隔的路径从配置中获取值，并允许环境变量覆盖。
         环境变量具有最高优先级。
@@ -37,6 +38,7 @@ class ConfigManager:
         :param key_path: 点分隔的路径，例如 'general.domain'
         :param env_var: 对应的环境变量名
         :param default: 如果都找不到，则返回此默认值
+        :return: 配置值
         """
         # 1. 检查环境变量(不区分大小写)
         if env_var:
@@ -70,3 +72,8 @@ class ConfigManager:
         # 3. 如果都找不到，则返回默认值
         return default
 
+    @property
+    def cert_check_interval_days(self) -> int:
+        """获取证书检查间隔天数，默认为7天"""
+        result = self.get('general.cert_check_interval_days', 'CERT_CHECK_INTERVAL_DAYS', 7)
+        return int(result) if result is not None else 7
