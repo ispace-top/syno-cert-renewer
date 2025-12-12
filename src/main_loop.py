@@ -30,6 +30,14 @@ logger = logging.getLogger(__name__)
 # 状态文件路径
 STATE_FILE_PATH = '/app/.scheduler_state'
 
+# 设置时区
+tz_offset_hours = int(os.environ.get('TZ_OFFSET_HOURS', '8'))  # 默认东八区(中国时区)
+local_tz_offset = timedelta(hours=tz_offset_hours)
+
+def get_local_time():
+    """获取本地时间"""
+    return datetime.utcnow() + local_tz_offset
+
 def load_scheduler_state():
     """加载调度器状态"""
     if os.path.exists(STATE_FILE_PATH):
@@ -79,7 +87,7 @@ def calculate_next_run_time():
     interval_days = config_manager.cert_check_interval_days
     
     # 默认按配置间隔计算下次运行时间
-    next_run = datetime.now() + timedelta(days=interval_days)
+    next_run = get_local_time() + timedelta(days=interval_days)
     
     # 检查状态文件中是否有更精确的下次运行时间
     state = load_scheduler_state()
@@ -107,7 +115,7 @@ def main():
             next_run_time = calculate_next_run_time()
             
             # 计算睡眠时间
-            sleep_seconds = (next_run_time - datetime.now()).total_seconds()
+            sleep_seconds = (next_run_time - get_local_time()).total_seconds()
             
             if sleep_seconds > 0:
                 logger.info(f"下次运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')} "

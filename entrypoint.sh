@@ -1,25 +1,29 @@
 #!/bin/sh
 
-# 立即退出如果任何命令失败
 set -e
 
-# --- 保存环境变量 ---
-echo ">> Saving environment variables..."
+# 设置默认时区为Asia/Shanghai，除非已设置
+if [ -z "$TZ" ]; then
+  TZ="Asia/Shanghai"
+fi
+
+# 设置时区
+ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+echo "$TZ" > /etc/timezone
+
+# 创建环境变量脚本
+echo "#!/bin/sh" > /app/env.sh
+
 # 只保存合法的环境变量名称（以字母或下划线开头，只包含字母、数字、下划线）
-printenv | grep -E '^[a-zA-Z_][a-zA-Z0-9_]*=' | awk -F'=' '{print "export " $1 "=\"" $2 "\""}' > /app/env.sh
-echo ">> Environment variables saved."
-echo " "
+printenv | grep -E '^[a-zA-Z_][a-zA-Z0-9_]*=' | awk -F'=' '{print "export " $1 "=\"" $2 "\""}' >> /app/env.sh
 
-# --- 首次运行 ---
-echo "================================================="
-echo "==      Synology Cert Renewer by Kerwin        =="
-echo "================================================="
-echo " "
+chmod +x /app/env.sh
 
-# 在前台启动主程序，使用内部循环定时执行任务，避免容器重启
-echo ">> 启动证书续签服务... 容器将持续运行。"
-echo "================================================="
-
-# 在前台启动Python脚本，让它自己管理定时任务
-. /app/env.sh
-exec python /app/src/main_loop.py
+# 启动主程序
+if [ "$1" = "loop" ]; then
+  echo "Starting in loop mode..."
+  exec python /app/src/main_loop.py
+else
+  echo "Starting in single run mode..."
+  exec python /app/src/main.py
+fi

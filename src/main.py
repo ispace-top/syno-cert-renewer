@@ -16,6 +16,10 @@ logging.basicConfig(level=logging.INFO,
 # --- 初始化配置管理器 ---
 config_mgr = ConfigManager()
 
+# 设置时区
+tz_offset_hours = int(os.environ.get('TZ_OFFSET_HOURS', '8'))  # 默认东八区(中国时区)
+local_tz_offset = timedelta(hours=tz_offset_hours)
+
 # --- 从配置和环境变量加载设置 (环境变量优先) ---
 
 # 基础配置
@@ -341,6 +345,11 @@ def install_cert():
     return True, ""
 
 
+def get_local_time():
+    """获取本地时间"""
+    return datetime.utcnow() + local_tz_offset
+
+
 def save_scheduler_state(next_run_time):
     """保存调度器状态（下次运行时间）"""
     try:
@@ -363,19 +372,19 @@ if __name__ == "__main__":
     if not need_renew:
         logging.info("--- 证书检查完成，无需操作 ---")
         # 计算下次运行时间
-        next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+        next_run_time = get_local_time() + timedelta(days=config_mgr.cert_check_interval_days)
         if expiry_date:
             # 根据证书过期时间计算下次运行时间，确保证书过期前 renew
             suggested_next_run = expiry_date - timedelta(days=RENEW_DAYS_BEFORE_EXPIRY - 1)
             next_run_time = min(next_run_time, suggested_next_run)
                 
         # 发送成功通知，包含完整的任务信息
-        success_details = f"✅ 证书续签检查完成\n\n域名: {DOMAIN}\n状态: SUCCESS\n事件: 证书有效期尚足，无需续签\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        success_details = f"✅ 证书续签检查完成\n\n域名: {DOMAIN}\n状态: SUCCESS\n事件: 证书有效期尚足，无需续签\n时间: {get_local_time().strftime('%Y-%m-%d %H:%M:%S')}\n下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
                 
         # 更新状态文件
         with open(STATE_FILE_PATH, 'w') as f:
             json.dump({
-                'last_run': datetime.now().isoformat(),
+                'last_run': get_local_time().isoformat(),
                 'expiry_date': expiry_date.isoformat() if expiry_date else None,
                 'need_renew': False
             }, f)
@@ -399,15 +408,15 @@ if __name__ == "__main__":
         logging.error(error_msg)
         
         # 计算下次运行时间
-        next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+        next_run_time = get_local_time() + timedelta(days=config_mgr.cert_check_interval_days)
         
         # 发送失败通知，包含完整的任务信息
-        failure_details = f"❌ 证书续签失败\n\n域名: {DOMAIN}\n状态: FAILURE\n事件: acme.sh 账户设置失败\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n原因: {error_msg}\n下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        failure_details = f"❌ 证书续签失败\n\n域名: {DOMAIN}\n状态: FAILURE\n事件: acme.sh 账户设置失败\n时间: {get_local_time().strftime('%Y-%m-%d %H:%M:%S')}\n原因: {error_msg}\n下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
         
         # 更新状态文件
         with open(STATE_FILE_PATH, 'w') as f:
             json.dump({
-                'last_run': datetime.now().isoformat(),
+                'last_run': get_local_time().isoformat(),
                 'expiry_date': expiry_date.isoformat() if expiry_date else None,
                 'need_renew': False
             }, f)
@@ -434,7 +443,7 @@ if __name__ == "__main__":
 
         # 构建最终通知消息
         final_details = f"✅ 证书续签成功\n\n域名: {DOMAIN}\n状态: SUCCESS\n"
-        final_details += f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        final_details += f"时间: {get_local_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
         final_details += f"证书保存位置: {CERT_OUTPUT_PATH}\n"
         final_details += "生成的群晖证书文件:\n"
         final_details += "  • privkey.pem (私钥文件)\n"
@@ -449,7 +458,7 @@ if __name__ == "__main__":
                 final_details += f"❌ 自动部署到 Synology DSM 失败: {deploy_error}\n\n"
 
         # 计算下次运行时间
-        next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+        next_run_time = get_local_time() + timedelta(days=config_mgr.cert_check_interval_days)
         # 获取新证书的过期时间
         _, new_expiry_date = needs_renewal(DOMAIN, RENEW_DAYS_BEFORE_EXPIRY)
         if new_expiry_date:
@@ -462,7 +471,7 @@ if __name__ == "__main__":
         # 更新状态文件
         with open(STATE_FILE_PATH, 'w') as f:
             json.dump({
-                'last_run': datetime.now().isoformat(),
+                'last_run': get_local_time().isoformat(),
                 'expiry_date': new_expiry_date.isoformat() if new_expiry_date else None,
                 'need_renew': False
             }, f)
@@ -489,10 +498,10 @@ if __name__ == "__main__":
             )
             
             # 对于速率限制等可恢复错误，设置较短的重试时间
-            next_run_time = datetime.now() + timedelta(hours=1)  # 1小时后重试
+            next_run_time = get_local_time() + timedelta(hours=1)  # 1小时后重试
             
             failure_details = f"❌ 证书续签失败\n\n域名: {DOMAIN}\n状态: FAILURE\n"
-            failure_details += f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            failure_details += f"时间: {get_local_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
             failure_details += f"原因: {user_friendly_error}\n"
             failure_details += f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
             
@@ -500,10 +509,10 @@ if __name__ == "__main__":
         else:
             # 对于所有其他错误，发送原始错误
             # 对于其他错误，按常规间隔再次运行
-            next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+            next_run_time = get_local_time() + timedelta(days=config_mgr.cert_check_interval_days)
             
             failure_details = f"❌ 证书续签失败\n\n域名: {DOMAIN}\n状态: FAILURE\n"
-            failure_details += f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            failure_details += f"时间: {get_local_time().strftime('%Y-%m-%d %H:%M:%S')}\n"
             failure_details += f"原因: {issue_error}\n"
             failure_details += f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
             
