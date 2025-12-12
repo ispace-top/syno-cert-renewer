@@ -33,5 +33,6 @@ COPY entrypoint.sh .
 # 给予入口脚本执行权限
 RUN chmod +x entrypoint.sh
 
-# 设置容器的入口点
+# 设置容器的入口点，默认以循环模式运行
 ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["loop"]
