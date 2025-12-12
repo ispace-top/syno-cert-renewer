@@ -6,7 +6,7 @@ set -e
 # --- 保存环境变量 ---
 echo ">> Saving environment variables..."
 # 只保存合法的环境变量名称（以字母或下划线开头，只包含字母、数字、下划线）
-printenv | grep -E '^[a-zA-Z_][a-zA-Z0-9_]*=' | sed 's/^\$$.*\$$$$export \1/g' > /app/env.sh
+printenv | grep -E '^[a-zA-Z_][a-zA-Z0-9_]*=' | awk -F'=' '{print "export " $1 "=\"" $2 "\""}' > /app/env.sh
 echo ">> Environment variables saved."
 echo " "
 
