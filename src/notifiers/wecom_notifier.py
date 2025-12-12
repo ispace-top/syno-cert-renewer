@@ -78,19 +78,11 @@ class WeComNotifier(BaseNotifier):
             logging.error("无法发送消息，因为 access_token 获取失败。")
             return
 
-        # --- 修改开始 ---
-
-        if status == "success":
-            title = "✅ 证书续签成功"
-        else:
-            title = "❌ 证书续签失败"
-        
         # 准备纯文本内容
-        text_content = (
-            f"{title}\n"
+        text_content = details if details else (
+            f"{'✅ 证书续签成功' if status == 'success' else '❌ 证书续签失败'}\n"
             f"域名: {domain}\n"
             f"状态: {status.upper()}\n"
-            f"详情: {details if details else '无'}"
         )
 
         send_url = f"{self.api_origin}/cgi-bin/message/send?access_token={token}"

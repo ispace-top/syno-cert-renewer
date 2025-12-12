@@ -357,29 +357,21 @@ if __name__ == "__main__":
 
     validate_config()
 
-    # 检查是否是首次运行
-    first_run = not os.path.exists(STATE_FILE_PATH)
-    
-    if first_run:
-        logging.info("检测到首次运行，将执行证书检查和更新...")
-        notification_mgr.dispatch(
-            "info",
-            DOMAIN,
-            details="容器首次启动，开始执行证书检查与申请..."
-        )
-    
     # 检查证书是否需要续签
     need_renew, expiry_date = needs_renewal(DOMAIN, RENEW_DAYS_BEFORE_EXPIRY)
-    
+            
     if not need_renew:
         logging.info("--- 证书检查完成，无需操作 ---")
-        # 直接发送一个"无需操作"的成功通知
-        notification_mgr.dispatch(
-            "success",
-            DOMAIN,
-            details=f"域名 {DOMAIN} 的证书有效期尚足，本次无需执行续签。"
-        )
-        
+        # 计算下次运行时间
+        next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+        if expiry_date:
+            # 根据证书过期时间计算下次运行时间，确保证书过期前 renew
+            suggested_next_run = expiry_date - timedelta(days=RENEW_DAYS_BEFORE_EXPIRY - 1)
+            next_run_time = min(next_run_time, suggested_next_run)
+                
+        # 发送成功通知，包含完整的任务信息
+        success_details = f"✅ 证书续签检查完成\n\n域名: {DOMAIN}\n状态: SUCCESS\n事件: 证书有效期尚足，无需续签\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                
         # 更新状态文件
         with open(STATE_FILE_PATH, 'w') as f:
             json.dump({
@@ -387,20 +379,14 @@ if __name__ == "__main__":
                 'expiry_date': expiry_date.isoformat() if expiry_date else None,
                 'need_renew': False
             }, f)
-        
-        # 计算下次运行时间
-        next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
-        if expiry_date:
-            # 根据证书过期时间计算下次运行时间，确保证书过期前 renew
-            suggested_next_run = expiry_date - timedelta(days=RENEW_DAYS_BEFORE_EXPIRY - 1)
-            next_run_time = min(next_run_time, suggested_next_run)
-        
+                
+        # 发送合并后的成功通知
         notification_mgr.dispatch(
-            "info",
+            "success",
             DOMAIN,
-            details=f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+            details=success_details
         )
-        
+                
         # 保存调度器状态供主循环使用
         save_scheduler_state(next_run_time)
         sys.exit(0)
@@ -411,14 +397,26 @@ if __name__ == "__main__":
     if not setup_acme_account():
         error_msg = "acme.sh 账户设置失败，程序终止。"
         logging.error(error_msg)
-        notification_mgr.dispatch("failure", DOMAIN, details=error_msg)
         
-        # 对于不可恢复的错误，按常规间隔再次运行
+        # 计算下次运行时间
         next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
+        
+        # 发送失败通知，包含完整的任务信息
+        failure_details = f"❌ 证书续签失败\n\n域名: {DOMAIN}\n状态: FAILURE\n事件: acme.sh 账户设置失败\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n原因: {error_msg}\n下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        # 更新状态文件
+        with open(STATE_FILE_PATH, 'w') as f:
+            json.dump({
+                'last_run': datetime.now().isoformat(),
+                'expiry_date': expiry_date.isoformat() if expiry_date else None,
+                'need_renew': False
+            }, f)
+        
+        # 发送失败通知
         notification_mgr.dispatch(
-            "info",
+            "failure",
             DOMAIN,
-            details=f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+            details=failure_details
         )
         
         # 保存调度器状态供主循环使用
@@ -434,40 +432,22 @@ if __name__ == "__main__":
         # 安装证书文件到输出目录
         install_success, install_error = install_cert()
 
-        if install_success:
-            success_details = f"证书已成功续签并保存到 {CERT_OUTPUT_PATH}。\n"
-            success_details += "生成的群晖证书文件:\n"
-            success_details += "  • privkey.pem (私钥文件)\n"
-            success_details += "  • cert.pem (证书文件)\n"
-            success_details += "  • chain.pem (中间证书)\n"
-            success_details += "  • fullchain.pem (完整证书链，备用)"
-
-            if AUTO_DEPLOY_TO_SYNOLOGY:
-                if deploy_success:
-                    success_details += "\n\n✅ 已成功自动部署到 Synology DSM。"
-                else:
-                    success_details += f"\n\n❌ 自动部署到 Synology DSM 失败: {deploy_error}"
-
-            logging.info("--- 证书自动化任务成功完成 ---")
-            notification_mgr.dispatch("success", DOMAIN, details=success_details)
-        else:
-            warning_details = f"证书续签成功，但保存证书到 {CERT_OUTPUT_PATH} 失败: {install_error}"
-            if AUTO_DEPLOY_TO_SYNOLOGY:
-                if deploy_success:
-                    warning_details += "\n✅ 已成功部署到 Synology DSM。"
-                else:
-                    warning_details += f"\n❌ 部署到 Synology DSM 失败: {deploy_error}"
-            logging.warning(warning_details)
-            notification_mgr.dispatch("success", DOMAIN, details=warning_details)
+        # 构建最终通知消息
+        final_details = f"✅ 证书续签成功\n\n域名: {DOMAIN}\n状态: SUCCESS\n"
+        final_details += f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        final_details += f"证书保存位置: {CERT_OUTPUT_PATH}\n"
+        final_details += "生成的群晖证书文件:\n"
+        final_details += "  • privkey.pem (私钥文件)\n"
+        final_details += "  • cert.pem (证书文件)\n"
+        final_details += "  • chain.pem (中间证书)\n"
+        final_details += "  • fullchain.pem (完整证书链，备用)\n\n"
         
-        # 更新状态文件
-        with open(STATE_FILE_PATH, 'w') as f:
-            json.dump({
-                'last_run': datetime.now().isoformat(),
-                'expiry_date': expiry_date.isoformat() if expiry_date else None,
-                'need_renew': False
-            }, f)
-        
+        if AUTO_DEPLOY_TO_SYNOLOGY:
+            if deploy_success:
+                final_details += "✅ 已成功自动部署到 Synology DSM。\n\n"
+            else:
+                final_details += f"❌ 自动部署到 Synology DSM 失败: {deploy_error}\n\n"
+
         # 计算下次运行时间
         next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
         # 获取新证书的过期时间
@@ -477,11 +457,18 @@ if __name__ == "__main__":
             suggested_next_run = new_expiry_date - timedelta(days=RENEW_DAYS_BEFORE_EXPIRY - 1)
             next_run_time = min(next_run_time, suggested_next_run)
         
-        notification_mgr.dispatch(
-            "info",
-            DOMAIN,
-            details=f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
+        final_details += f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        # 更新状态文件
+        with open(STATE_FILE_PATH, 'w') as f:
+            json.dump({
+                'last_run': datetime.now().isoformat(),
+                'expiry_date': new_expiry_date.isoformat() if new_expiry_date else None,
+                'need_renew': False
+            }, f)
+        
+        logging.info("--- 证书自动化任务成功完成 ---")
+        notification_mgr.dispatch("success", DOMAIN, details=final_details)
         
         # 保存调度器状态供主循环使用
         save_scheduler_state(next_run_time)
@@ -492,34 +479,35 @@ if __name__ == "__main__":
         if "urn:ietf:params:acme:error:rateLimited" in issue_error or "too many certificates" in issue_error:
             user_friendly_error = (
                 "证书申请失败：达到 Let's Encrypt 的速率限制。\n\n"
-                "**原因**: 这通常是因为在短时间内重复申请了太多次新证书。最常见的原因是 Docker 容器没有持久化 `/root/.acme.sh` 目录，导致每次重启都像初次运行一样申请新证书。\n\n"
-                "**解决方案**:\n"
-                "1. **检查并添加卷挂载**: 请确保您的 `docker-compose.yml` 文件中包含了以下这行，以持久化 `acme.sh` 的状态：\n"
-                "   `volumes:`\n"
-                "   `  - ./acme.sh:/root/.acme.sh`\n"
-                "2. **等待限制解除**: 您需要等待速率限制解除后才能再次成功申请。请查看以下原始错误日志中的 `retry after` 时间点。\n\n"
-                f"**原始错误详情**:\n{issue_error}"
+                "原因: 这通常是因为在短时间内重复申请了太多次新证书。最常见的原因是 Docker 容器没有持久化 `/root/.acme.sh` 目录，导致每次重启都像初次运行一样申请新证书。\n\n"
+                "解决方案:\n"
+                "1. 检查并添加卷挂载: 请确保您的 `docker-compose.yml` 文件中包含了以下这行，以持久化 `acme.sh` 的状态：\n"
+                "   volumes:\n"
+                "     - ./acme.sh:/root/.acme.sh\n"
+                "2. 等待限制解除: 您需要等待速率限制解除后才能再次成功申请。请查看以下原始错误日志中的 retry after 时间点。\n\n"
+                f"原始错误详情:\n{issue_error}"
             )
-            notification_mgr.dispatch("failure", DOMAIN, details=user_friendly_error)
             
             # 对于速率限制等可恢复错误，设置较短的重试时间
             next_run_time = datetime.now() + timedelta(hours=1)  # 1小时后重试
-            notification_mgr.dispatch(
-                "info",
-                DOMAIN,
-                details=f"由于遇到可恢复错误，将在 {next_run_time.strftime('%Y-%m-%d %H:%M:%S')} 重试..."
-            )
+            
+            failure_details = f"❌ 证书续签失败\n\n域名: {DOMAIN}\n状态: FAILURE\n"
+            failure_details += f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            failure_details += f"原因: {user_friendly_error}\n"
+            failure_details += f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+            
+            notification_mgr.dispatch("failure", DOMAIN, details=failure_details)
         else:
             # 对于所有其他错误，发送原始错误
-            notification_mgr.dispatch("failure", DOMAIN, details=issue_error)
-            
             # 对于其他错误，按常规间隔再次运行
             next_run_time = datetime.now() + timedelta(days=config_mgr.cert_check_interval_days)
-            notification_mgr.dispatch(
-                "info",
-                DOMAIN,
-                details=f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
-            )
+            
+            failure_details = f"❌ 证书续签失败\n\n域名: {DOMAIN}\n状态: FAILURE\n"
+            failure_details += f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            failure_details += f"原因: {issue_error}\n"
+            failure_details += f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+            
+            notification_mgr.dispatch("failure", DOMAIN, details=failure_details)
         
         # 保存调度器状态供主循环使用
         save_scheduler_state(next_run_time)
