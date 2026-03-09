@@ -50,7 +50,8 @@ notification_mgr = NotificationManager()
 
 def needs_renewal(domain: str, days_before_expiry: int) -> tuple:
     """
-    通过 OpenSSL 检查域名的 SSL 证书是否需要续签。
+    检查域名的 SSL 证书是否需要续签。
+    优先检查本地存储的证书文件，避免通过网络连接检查到 CDN/代理等非实际证书。
 
     :param domain: 要检查的域名。
     :param days_before_expiry: 在证书过期前多少天应判断为需要续签。
@@ -58,29 +59,48 @@ def needs_renewal(domain: str, days_before_expiry: int) -> tuple:
     """
     logging.info(f"开始检查域名 '{domain}' 的证书状态...")
 
-    try:
-        # 使用 openssl s_client 获取证书信息
-        command = f"echo | openssl s_client -connect {domain}:443 -servername {domain} 2>/dev/null | openssl x509 -noout -enddate"
+    # 按优先级检查本地证书文件：
+    # 1. 已部署到输出目录的证书
+    # 2. acme.sh 存储的 EC 证书
+    # 3. acme.sh 存储的 RSA 证书
+    cert_candidates = [
+        os.path.join(CERT_OUTPUT_PATH, 'cert.pem'),
+        f'/root/.acme.sh/{domain}_ecc/{domain}.cer',
+        f'/root/.acme.sh/{domain}/{domain}.cer',
+    ]
 
+    cert_file = None
+    for path in cert_candidates:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            cert_file = path
+            break
+
+    if cert_file is None:
+        logging.info("未找到本地证书文件，将申请新证书。")
+        return True, None
+
+    logging.info(f"检查本地证书文件: {cert_file}")
+
+    try:
+        command = f"openssl x509 -noout -enddate -in {cert_file}"
         process = subprocess.run(
             command,
             shell=True,
             check=True,
             capture_output=True,
             text=True,
-            timeout=15  # 15秒超时
+            timeout=10
         )
 
         output = process.stdout.strip()
 
         if not output.startswith('notAfter='):
-            logging.warning(f"无法从命令输出中解析有效期: {output}")
+            logging.warning(f"无法从证书文件解析有效期: {output}")
             logging.info("将默认需要续签以确保安全。")
             return True, None
 
-        # 解析日期
+        # 解析日期，OpenSSL 日期格式: "Month Day HH:MM:SS YYYY GMT"
         expiry_date_str = output.split('=', 1)[1]
-        # OpenSSL 日期格式: "Month Day HH:MM:SS YYYY GMT"
         expiry_date = datetime.strptime(expiry_date_str, '%b %d %H:%M:%S %Y %Z')
 
         time_left = expiry_date - datetime.utcnow()
@@ -95,12 +115,12 @@ def needs_renewal(domain: str, days_before_expiry: int) -> tuple:
             return False, expiry_date
 
     except subprocess.TimeoutExpired:
-        logging.warning(f"检查证书时连接到 '{domain}:443' 超时。")
-        logging.info("将默认需要续签以确保可用性。")
+        logging.warning(f"读取证书文件 '{cert_file}' 超时。")
+        logging.info("将默认需要续签以确保安全。")
         return True, None
     except subprocess.CalledProcessError as e:
-        logging.warning(f"使用 OpenSSL 检查证书失败: {e.stderr}")
-        logging.info("可能是域名不存在、未部署证书或网络问题。将默认需要续签。")
+        logging.warning(f"解析证书文件 '{cert_file}' 失败: {e.stderr}")
+        logging.info("将默认需要续签以确保安全。")
         return True, None
     except Exception as e:
         logging.error(f"检查证书时发生未知错误: {e}")
