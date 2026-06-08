@@ -249,18 +249,19 @@ def deploy_to_synology():
     deploy_command = [
         acme_sh_path, '--deploy',
         '-d', DOMAIN,
-        '--deploy-hook', 'synology_dsm'
+        '--deploy-hook', 'synology_dsm',
+        '--ecc'
     ]
 
-    # 准备群晖部署所需的环境变量
+    # acme.sh 的 synology_dsm hook 通过 _getdeployconf 读取环境变量，大小写敏感
     deploy_env = {
-        'SYNO_USERNAME': SYNO_USERNAME,
-        'SYNO_PASSWORD': SYNO_PASSWORD,
-        'SYNO_HOSTNAME': SYNO_HOSTNAME,
-        'SYNO_PORT': str(SYNO_PORT),
-        'SYNO_SCHEME': SYNO_SCHEME,
-        'SYNO_CERTIFICATE': SYNO_CERTIFICATE,
-        'SYNO_CREATE': str(SYNO_CREATE)
+        'SYNO_Username': SYNO_USERNAME,
+        'SYNO_Password': SYNO_PASSWORD,
+        'SYNO_Hostname': SYNO_HOSTNAME,
+        'SYNO_Port': str(SYNO_PORT),
+        'SYNO_Scheme': SYNO_SCHEME,
+        'SYNO_Certificate': SYNO_CERTIFICATE,
+        'SYNO_Create': str(SYNO_CREATE)
     }
 
     logging.info(f"部署参数: 主机={SYNO_HOSTNAME}:{SYNO_PORT}, 协议={SYNO_SCHEME}, 创建新证书={SYNO_CREATE}")
@@ -344,6 +345,7 @@ def install_cert():
     install_command = [
         acme_sh_path, '--install-cert',
         '-d', DOMAIN,
+        '--ecc',
         '--key-file', privkey_path,        # 私钥文件
         '--cert-file', cert_path,          # 证书文件（仅包含域名证书）
         '--ca-file', ca_path,              # 中间证书文件
