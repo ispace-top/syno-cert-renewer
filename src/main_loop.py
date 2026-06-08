@@ -70,7 +70,7 @@ def run_certificate_check():
 
         def read_output():
             for line in process.stdout:
-                logger.info(f"[main.py] {line.strip()}")
+                print(line, end='', flush=True)
 
         reader = threading.Thread(target=read_output, daemon=True)
         reader.start()
