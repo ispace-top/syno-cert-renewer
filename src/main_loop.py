@@ -59,24 +59,31 @@ def save_scheduler_state(state):
 def run_certificate_check():
     """运行证书检查和更新任务"""
     logger.info("开始执行证书检查与更新任务...")
-    
+
     try:
-        # 执行主程序
-        result = subprocess.run([
+        # 执行主程序，使用 Popen 实时输出日志
+        process = subprocess.Popen([
             'python', '/app/src/main.py'
-        ], capture_output=True, text=True, timeout=300)  # 5分钟超时
-        
-        if result.returncode == 0:
+        ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+        # 实时读取输出并记录
+        for line in process.stdout:
+            logger.info(f"[main.py] {line.strip()}")
+
+        # 等待进程完成，设置 15 分钟超时（acme.sh DNS 验证可能需要较长时间）
+        try:
+            process.wait(timeout=900)
+        except subprocess.TimeoutExpired:
+            logger.error("证书检查与更新任务执行超时（15分钟）")
+            process.kill()
+            return False
+
+        if process.returncode == 0:
             logger.info("证书检查与更新任务执行成功")
-            logger.debug(f"输出: {result.stdout}")
         else:
-            logger.error(f"证书检查与更新任务执行失败，返回码: {result.returncode}")
-            logger.error(f"错误输出: {result.stderr}")
-            
-        return result.returncode == 0
-    except subprocess.TimeoutExpired:
-        logger.error("证书检查与更新任务执行超时")
-        return False
+            logger.error(f"证书检查与更新任务执行失败，返回码: {process.returncode}")
+
+        return process.returncode == 0
     except Exception as e:
         logger.error(f"执行证书检查与更新任务时发生异常: {e}")
         return False

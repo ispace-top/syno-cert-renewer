@@ -161,7 +161,7 @@ def validate_config():
     logging.info("配置验证通过。")
 
 
-def run_command(command, env_vars=None):
+def run_command(command, env_vars=None, timeout=600):
     """执行一个 shell 命令并返回成功状态和输出"""
     env = os.environ.copy()
     if env_vars:
@@ -173,11 +173,16 @@ def run_command(command, env_vars=None):
             check=True,
             capture_output=True,
             text=True,
-            env=env
+            env=env,
+            timeout=timeout
         )
         logging.info(f"命令 '{' '.join(command)}' 执行成功。")
         logging.debug(f"输出:\n{process.stdout}")
         return True, process.stdout
+    except subprocess.TimeoutExpired:
+        error_msg = f"命令 '{' '.join(command)}' 执行超时（{timeout}秒）"
+        logging.error(error_msg)
+        return False, error_msg
     except subprocess.CalledProcessError as e:
         # 将标准输出和标准错误都记录下来，因为acme.sh有时会将信息输出到stdout
         error_output = f"标准输出:\n{e.stdout}\n标准错误:\n{e.stderr}"
