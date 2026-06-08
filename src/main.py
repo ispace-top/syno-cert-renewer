@@ -542,6 +542,7 @@ if __name__ == "__main__":
             failure_details += f"下次计划运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}"
             
             notification_mgr.dispatch("failure", DOMAIN, details=failure_details)
-        
+
         # 保存调度器状态供主循环使用
         save_scheduler_state(next_run_time)
+        sys.exit(1)
