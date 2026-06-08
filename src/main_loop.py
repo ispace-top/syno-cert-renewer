@@ -66,9 +66,14 @@ def run_certificate_check():
             'python', '/app/src/main.py'
         ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
-        # 实时读取输出并记录
-        for line in process.stdout:
-            logger.info(f"[main.py] {line.strip()}")
+        import threading
+
+        def read_output():
+            for line in process.stdout:
+                logger.info(f"[main.py] {line.strip()}")
+
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
 
         # 等待进程完成，设置 15 分钟超时（acme.sh DNS 验证可能需要较长时间）
         try:
@@ -76,7 +81,10 @@ def run_certificate_check():
         except subprocess.TimeoutExpired:
             logger.error("证书检查与更新任务执行超时（15分钟）")
             process.kill()
+            process.wait()
             return False
+
+        reader.join(timeout=5)
 
         if process.returncode == 0:
             logger.info("证书检查与更新任务执行成功")

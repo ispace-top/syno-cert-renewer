@@ -19,13 +19,6 @@ printenv | grep -E '^[a-zA-Z_][a-zA-Z0-9_]*=' | awk -F'=' '{print "export " $1 "
 
 chmod +x /app/env.sh
 
-# 首次挂载时如果 acme.sh 目录为空，重新克隆
-if [ ! -f /root/.acme.sh/acme.sh ]; then
-  echo "acme.sh 未找到，正在初始化..."
-  rm -rf /root/.acme.sh/*
-  git clone https://github.com/acmesh-official/acme.sh.git /root/.acme.sh
-fi
-
 # 启动主程序
 if [ "$1" = "loop" ]; then
   echo "Starting in loop mode..."

@@ -515,12 +515,10 @@ if __name__ == "__main__":
         if "urn:ietf:params:acme:error:rateLimited" in issue_error or "too many certificates" in issue_error:
             user_friendly_error = (
                 "证书申请失败：达到 Let's Encrypt 的速率限制。\n\n"
-                "原因: 这通常是因为在短时间内重复申请了太多次新证书。最常见的原因是 Docker 容器没有持久化 `/root/.acme.sh` 目录，导致每次重启都像初次运行一样申请新证书。\n\n"
+                "原因: 这通常是因为在短时间内重复申请了太多次新证书（同一域名每周最多 5 张证书）。\n\n"
                 "解决方案:\n"
-                "1. 检查并添加卷挂载: 请确保您的 `docker-compose.yml` 文件中包含了以下这行，以持久化 `acme.sh` 的状态：\n"
-                "   volumes:\n"
-                "     - ./acme.sh:/root/.acme.sh\n"
-                "2. 等待限制解除: 您需要等待速率限制解除后才能再次成功申请。请查看以下原始错误日志中的 retry after 时间点。\n\n"
+                "1. 等待限制解除: 您需要等待速率限制解除后才能再次成功申请。请查看以下原始错误日志中的 retry after 时间点。\n"
+                "2. 避免频繁重建容器: 每次删除并重建容器都会导致重新申请证书，从而更快地触发限制。\n\n"
                 f"原始错误详情:\n{issue_error}"
             )
             
